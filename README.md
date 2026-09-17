@@ -2,7 +2,7 @@
 
 Browser-based top-down miniature golf — solo offline play or real-time multiplayer with short room codes. Built with **Vite + TypeScript + HTML Canvas** and **Trystero** (BitTorrent tracker signaling) for peer-to-peer sync. No accounts, no paid backend.
 
-Each round deals **9 holes from a pool of 1,000** procedurally generated courses, each with a themed surround (tropical, desert, arctic, volcano, neon, pirate, space, autumn, castle, candy).
+Each round deals **9 holes from a pool of 1,000** template-built courses (straight, dogleg, Y-split, S-curve, bank corridor, runaround, gate, island, hill-break, horseshoe, chicane) with short-nap carpet greens, each with a themed surround (tropical, desert, arctic, volcano, neon, pirate, space, autumn, castle, candy).
 
 ## How to play
 

@@ -36,12 +36,13 @@ export type HoleThemeId =
 
 /** Deterministic grass look — same hole id ⇒ same pattern in multiplayer. */
 export type GrassPattern =
+  | { kind: 'carpet'; width: number; angle: number; a: string; b: string; sheen: string }
+  | { kind: 'mow'; width: number; angle: number; a: string; b: string }
   | { kind: 'checker'; tile: number; a: string; b: string }
   | { kind: 'stripes'; width: number; angle: number; a: string; b: string }
   | { kind: 'diamonds'; size: number; a: string; b: string }
   | { kind: 'noise'; scale: number; a: string; b: string; c: string }
-  | { kind: 'rings'; spacing: number; a: string; b: string }
-  | { kind: 'mow'; width: number; angle: number; a: string; b: string };
+  | { kind: 'rings'; spacing: number; a: string; b: string };
 
 export type HoleDef = {
   id: number;

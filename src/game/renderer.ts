@@ -8,7 +8,6 @@ const SAND_DARK = '#d4bc80';
 const ICE = '#b8e0f0';
 const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
-const TEE = 'rgba(255,255,255,0.35)';
 
 /** World-space padding around the playable green for themed surroundings. */
 export const THEME_PAD = 56;
@@ -115,20 +114,7 @@ export class Renderer {
     for (const z of hole.zones) drawZone(ctx, z);
     ctx.restore();
 
-    // Tee marker
-    ctx.fillStyle = TEE;
-    ctx.beginPath();
-    ctx.arc(hole.tee.x, hole.tee.y, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = '700 10px system-ui,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('TEE', hole.tee.x, hole.tee.y);
-
+    drawTeePad(ctx, hole);
     drawCup(ctx, hole.cup.x, hole.cup.y, hole.cupRadius);
 
     for (const w of hole.walls) {
@@ -222,7 +208,14 @@ function pathPoly(ctx: CanvasRenderingContext2D, poly: Vec2[]): void {
 }
 
 function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
-  const g: GrassPattern = hole.grass ?? { kind: 'checker', tile: 40, a: '#2d8a4e', b: '#267a44' };
+  const g: GrassPattern = hole.grass ?? {
+    kind: 'carpet',
+    width: 18,
+    angle: 0,
+    a: '#2f9b56',
+    b: '#288a4b',
+    sheen: '#3aad62',
+  };
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -233,11 +226,54 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   }
-  // Base fill
-  ctx.fillStyle = g.a;
-  ctx.fillRect(minX - 2, minY - 2, maxX - minX + 4, maxY - minY + 4);
+  const bw = maxX - minX + 8;
+  const bh = maxY - minY + 8;
 
-  if (g.kind === 'checker') {
+  // Base nap fill
+  ctx.fillStyle = g.a;
+  ctx.fillRect(minX - 4, minY - 4, bw, bh);
+
+  if (g.kind === 'carpet' || g.kind === 'mow' || g.kind === 'stripes') {
+    const ang = 'angle' in g ? g.angle : 0;
+    const w = 'width' in g ? g.width : 18;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    const span = Math.hypot(maxX - minX, maxY - minY) + 80;
+    // Soft directional mow bands (low contrast — short-nap carpet)
+    for (let i = -span; i < span; i += w * 2) {
+      ctx.fillStyle = g.b;
+      ctx.globalAlpha = g.kind === 'stripes' ? 0.85 : 0.28;
+      ctx.fillRect(i, -span, w, span * 2);
+    }
+    // Finer grain lines for carpet texture
+    if (g.kind === 'carpet' || g.kind === 'mow') {
+      ctx.globalAlpha = 0.07;
+      ctx.strokeStyle = g.b;
+      ctx.lineWidth = 1;
+      for (let i = -span; i < span; i += 3.5) {
+        ctx.beginPath();
+        ctx.moveTo(i, -span);
+        ctx.lineTo(i, span);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // Nap sheen — soft anisotropic highlight along mow
+    ctx.save();
+    const sheenColor = g.kind === 'carpet' ? g.sheen : g.a;
+    const sg = ctx.createLinearGradient(minX, minY, maxX, maxY);
+    sg.addColorStop(0, 'rgba(255,255,255,0)');
+    sg.addColorStop(0.35, hexAlpha(sheenColor, 0.14));
+    sg.addColorStop(0.55, 'rgba(255,255,255,0.06)');
+    sg.addColorStop(1, 'rgba(0,0,0,0.06)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(minX - 4, minY - 4, bw, bh);
+    ctx.restore();
+  } else if (g.kind === 'checker') {
     const tile = g.tile;
     for (let y = Math.floor(minY / tile) * tile; y < maxY; y += tile) {
       for (let x = Math.floor(minX / tile) * tile; x < maxX; x += tile) {
@@ -247,24 +283,10 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
         }
       }
     }
-  } else if (g.kind === 'stripes' || g.kind === 'mow') {
-    const ang = g.angle;
-    const w = g.width;
-    ctx.save();
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    ctx.translate(cx, cy);
-    ctx.rotate(ang);
-    const span = Math.hypot(maxX - minX, maxY - minY) + 40;
-    for (let i = -span; i < span; i += w * 2) {
-      ctx.fillStyle = g.b;
-      ctx.globalAlpha = g.kind === 'mow' ? 0.55 : 1;
-      ctx.fillRect(i, -span, w, span * 2);
-    }
-    ctx.restore();
   } else if (g.kind === 'diamonds') {
     const s = g.size;
     ctx.fillStyle = g.b;
+    ctx.globalAlpha = 0.35;
     for (let y = minY - s; y < maxY + s; y += s) {
       for (let x = minX - s; x < maxX + s; x += s) {
         const ox = ((Math.floor(y / s) % 2) * s) / 2;
@@ -277,6 +299,7 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
         ctx.fill();
       }
     }
+    ctx.globalAlpha = 1;
   } else if (g.kind === 'noise') {
     const scale = g.scale;
     const seed = hole.id * 9973;
@@ -284,7 +307,7 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
       for (let x = minX; x < maxX; x += scale) {
         const n = hash2(seed, x, y);
         ctx.fillStyle = n < 0.33 ? g.a : n < 0.66 ? g.b : g.c;
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.55;
         ctx.fillRect(x, y, scale + 0.5, scale + 0.5);
       }
     }
@@ -295,7 +318,7 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
     const maxR = Math.hypot(maxX - minX, maxY - minY);
     for (let r = g.spacing; r < maxR; r += g.spacing * 2) {
       ctx.strokeStyle = g.b;
-      ctx.globalAlpha = 0.45;
+      ctx.globalAlpha = 0.25;
       ctx.lineWidth = g.spacing;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -303,6 +326,21 @@ function drawGrass(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]):
     }
     ctx.globalAlpha = 1;
   }
+
+  // Soft contact-shadow vignette at cut edge (reads as thick carpet pile)
+  ctx.save();
+  pathPoly(ctx, green);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(0,40,20,0.2)';
+  ctx.lineWidth = 14;
+  ctx.lineJoin = 'round';
+  pathPoly(ctx, green);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 3;
+  pathPoly(ctx, green);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function hash2(seed: number, x: number, y: number): number {
@@ -483,22 +521,33 @@ function drawWindIndicator(ctx: CanvasRenderingContext2D, hole: HoleDef, green: 
 
 function drawGreenRim(ctx: CanvasRenderingContext2D, green: Vec2[], theme: HoleTheme): void {
   ctx.save();
-  // Outer dark curb
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = 10;
   ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  // Outer rail shadow
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 14;
   pathPoly(ctx, green);
   ctx.stroke();
-  // Theme-colored bevel
+  // Theme wood/metal rail body
+  ctx.strokeStyle = theme.wall;
+  ctx.lineWidth = 9;
+  pathPoly(ctx, green);
+  ctx.stroke();
+  // Top bevel
   ctx.strokeStyle = theme.wallTop;
-  ctx.globalAlpha = 0.75;
-  ctx.lineWidth = 5;
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = 4;
   pathPoly(ctx, green);
   ctx.stroke();
-  // Highlight lip
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  // Clean cut lip against carpet
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.globalAlpha = 1;
   ctx.lineWidth = 1.5;
+  pathPoly(ctx, green);
+  ctx.stroke();
+  // Inner dark edge (carpet cut)
+  ctx.strokeStyle = 'rgba(10,40,20,0.35)';
+  ctx.lineWidth = 2;
   pathPoly(ctx, green);
   ctx.stroke();
   ctx.restore();
@@ -806,24 +855,37 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
 }
 
 function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: number): void {
-  ctx.fillStyle = 'rgba(20,60,35,0.55)';
+  // Closely-mown collar ring
+  ctx.fillStyle = 'rgba(40, 110, 60, 0.55)';
   ctx.beginPath();
-  ctx.arc(cx, cy, cupR + 4, 0, Math.PI * 2);
+  ctx.arc(cx, cy, cupR + 7, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, cupR + 7, 0, Math.PI * 2);
+  ctx.stroke();
 
-  const rim = ctx.createRadialGradient(cx - 2, cy - 2, cupR * 0.4, cx, cy, cupR + 2);
-  rim.addColorStop(0, '#2a2a2a');
-  rim.addColorStop(0.7, '#1a1a1a');
-  rim.addColorStop(0.85, '#555');
-  rim.addColorStop(1, '#333');
+  // White cup liner ring
+  ctx.strokeStyle = 'rgba(245,245,245,0.92)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, cupR + 2.5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const rim = ctx.createRadialGradient(cx - 2, cy - 2, cupR * 0.35, cx, cy, cupR + 2);
+  rim.addColorStop(0, '#222');
+  rim.addColorStop(0.65, '#111');
+  rim.addColorStop(0.88, '#666');
+  rim.addColorStop(1, '#444');
   ctx.fillStyle = rim;
   ctx.beginPath();
   ctx.arc(cx, cy, cupR + 2, 0, Math.PI * 2);
   ctx.fill();
 
-  const hole = ctx.createRadialGradient(cx, cy, 1, cx, cy, cupR);
+  const hole = ctx.createRadialGradient(cx - 1, cy - 1, 1, cx, cy, cupR);
   hole.addColorStop(0, '#000');
-  hole.addColorStop(0.7, CUP_DARK);
+  hole.addColorStop(0.65, CUP_DARK);
   hole.addColorStop(1, '#1a1a1a');
   ctx.fillStyle = hole;
   ctx.beginPath();
@@ -835,26 +897,80 @@ function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: nu
   ctx.ellipse(cx + 1, cy + 2, cupR * 0.55, cupR * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = '#f5f5f5';
+  // Flagstick
+  ctx.strokeStyle = '#f8f8f8';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
-  ctx.lineTo(cx, cy - 38);
+  ctx.lineTo(cx, cy - 40);
   ctx.stroke();
+  ctx.fillStyle = 'rgba(200,200,200,0.9)';
+  ctx.beginPath();
+  ctx.arc(cx, cy - 40, 2.2, 0, Math.PI * 2);
+  ctx.fill();
 
-  const flagG = ctx.createLinearGradient(cx, cy - 38, cx + 20, cy - 20);
+  const flagG = ctx.createLinearGradient(cx, cy - 40, cx + 22, cy - 22);
   flagG.addColorStop(0, '#ff6b6b');
   flagG.addColorStop(1, '#c9184a');
   ctx.fillStyle = flagG;
   ctx.beginPath();
-  ctx.moveTo(cx, cy - 38);
-  ctx.lineTo(cx + 20, cy - 29);
+  ctx.moveTo(cx, cy - 40);
+  ctx.lineTo(cx + 22, cy - 30);
   ctx.lineTo(cx, cy - 20);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
   ctx.lineWidth = 1;
   ctx.stroke();
+}
+
+function drawTeePad(ctx: CanvasRenderingContext2D, hole: HoleDef): void {
+  const tx = hole.tee.x;
+  const ty = hole.tee.y;
+  const ang = Math.atan2(hole.cup.y - ty, hole.cup.x - tx);
+  ctx.save();
+  ctx.translate(tx, ty);
+  ctx.rotate(ang);
+  // Rubber / turf tee mat
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  roundRect(ctx, -18, -14, 36, 28, 5);
+  ctx.fill();
+  const g = ctx.createLinearGradient(0, -12, 0, 12);
+  g.addColorStop(0, '#3d5c45');
+  g.addColorStop(0.5, '#2f4a38');
+  g.addColorStop(1, '#24382c');
+  ctx.fillStyle = g;
+  roundRect(ctx, -16, -12, 32, 24, 4);
+  ctx.fill();
+  // Mat grain
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  for (let i = -10; i <= 10; i += 3) {
+    ctx.beginPath();
+    ctx.moveTo(-12, i);
+    ctx.lineTo(12, i);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, -16, -12, 32, 24, 4);
+  ctx.stroke();
+  // Center spot
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function hexAlpha(hex: string, a: number): string {
+  const n = hex.replace('#', '');
+  const full = n.length === 3 ? n.split('').map((c) => c + c).join('') : n;
+  const num = parseInt(full, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 function drawWall(
