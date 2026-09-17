@@ -18,7 +18,7 @@ const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
 
 /** World-space padding around the playable green for themed surroundings. */
-export const THEME_PAD = 160;
+export const THEME_PAD = 220;
 
 export type AimPreview = {
   from: Vec2;
@@ -1501,101 +1501,111 @@ function drawHolePlaque(
 ): void {
   const { minX, minY, maxX, maxY } = polyBounds(green);
   const topN = Math.min(8, Math.max(scores.length, 0));
-  const headerH = 108;
-  const rowH = 18;
-  const listH = 22 + topN * rowH + (topN === 0 ? 18 : 8);
-  const boxW = 210;
+
+  // Keep the sign in the themed surround, but give it enough room that the
+  // information remains readable after the whole course is scaled to a phone.
+  const headerH = 148;
+  const rowH = 29;
+  const listH = 34 + topN * rowH + (topN === 0 ? 26 : 14);
+  const boxW = 360;
   const boxH = headerH + listH;
 
-  // Prefer left pad, mid-height — clearly outside putting green
-  let x = Math.max(-pad + 10, minX - boxW - 16);
-  let y = Math.min(Math.max(minY + 8, -pad + 14), maxY - boxH * 0.35);
-  // If left is cramped, try right pad
-  if (x < -pad + 8) {
-    x = Math.min(hole.width + pad - boxW - 10, maxX + 16);
-  }
-  x = Math.max(-pad + 8, Math.min(hole.width + pad - boxW - 8, x));
-  y = Math.max(-pad + 10, Math.min(hole.height + pad - boxH - 10, y));
+  // Prefer the left side of the board. The generous pad keeps the plaque away
+  // from the tee-to-cup line whenever the course has room for it.
+  const leftX = minX - boxW - 22;
+  const rightX = maxX + 22;
+  const leftFits = leftX >= -pad + 10;
+  const rightFits = rightX + boxW <= hole.width + pad - 10;
+  let x = leftFits ? leftX : rightFits ? rightX : leftX;
+  let y = Math.min(Math.max(minY + 18, -pad + 14), maxY - boxH * 0.35);
+  x = Math.max(-pad + 10, Math.min(hole.width + pad - boxW - 10, x));
+  y = Math.max(-pad + 12, Math.min(hole.height + pad - boxH - 12, y));
 
   ctx.save();
-  // Post
-  ctx.fillStyle = '#4a3224';
-  ctx.fillRect(x + boxW / 2 - 6, y + boxH - 2, 12, 28);
-  // Plaque body
-  const g = ctx.createLinearGradient(x, y, x, y + boxH);
-  g.addColorStop(0, '#f7ecd4');
-  g.addColorStop(0.55, '#e8d7b0');
-  g.addColorStop(1, '#d2be90');
-  ctx.fillStyle = g;
-  roundRect(ctx, x, y, boxW, boxH, 12);
+  // Soft shadow makes the larger sign stand out against every theme.
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  roundRect(ctx, x + 7, y + 9, boxW, boxH, 16);
   ctx.fill();
-  ctx.strokeStyle = '#8b6914';
-  ctx.lineWidth = 4;
-  roundRect(ctx, x, y, boxW, boxH, 12);
+
+  // Post
+  ctx.fillStyle = '#3b2519';
+  ctx.fillRect(x + boxW / 2 - 8, y + boxH - 2, 16, 36);
+
+  // Plaque body: bright face, very dark copy, and a high-contrast border.
+  const g = ctx.createLinearGradient(x, y, x, y + boxH);
+  g.addColorStop(0, '#fff8e8');
+  g.addColorStop(0.55, '#f4e4bd');
+  g.addColorStop(1, '#dfc891');
+  ctx.fillStyle = g;
+  roundRect(ctx, x, y, boxW, boxH, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#4d2c0d';
+  ctx.lineWidth = 6;
+  roundRect(ctx, x, y, boxW, boxH, 16);
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-  ctx.lineWidth = 2;
-  roundRect(ctx, x + 5, y + 5, boxW - 10, boxH - 10, 8);
+  ctx.strokeStyle = 'rgba(255,255,255,0.78)';
+  ctx.lineWidth = 2.5;
+  roundRect(ctx, x + 8, y + 8, boxW - 16, boxH - 16, 11);
   ctx.stroke();
 
   const cx = x + boxW / 2;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.fillStyle = '#5a3a12';
-  ctx.font = '800 15px system-ui,sans-serif';
-  ctx.fillText(`HOLE ${hole.id}`, cx, y + 22);
+  ctx.fillStyle = '#4a2605';
+  ctx.font = '900 24px system-ui,sans-serif';
+  ctx.fillText(`HOLE ${hole.id}`, cx, y + 34);
 
-  ctx.fillStyle = '#1a1008';
-  let nameFont = '800 18px system-ui,sans-serif';
+  ctx.fillStyle = '#120d06';
+  let nameFont = '900 27px system-ui,sans-serif';
   ctx.font = nameFont;
   const name = hole.name;
-  if (ctx.measureText(name).width > boxW - 20) {
-    nameFont = '800 14px system-ui,sans-serif';
+  if (ctx.measureText(name).width > boxW - 32) {
+    nameFont = '900 21px system-ui,sans-serif';
     ctx.font = nameFont;
   }
-  ctx.fillText(name, cx, y + 46);
+  ctx.fillText(name, cx, y + 72);
 
-  ctx.font = '700 15px system-ui,sans-serif';
-  ctx.fillStyle = '#3a2810';
-  ctx.fillText(`Par ${hole.par}  ·  ${hole.lengthFeet} ft`, cx, y + 72);
+  ctx.font = '800 21px system-ui,sans-serif';
+  ctx.fillStyle = '#2f1b08';
+  ctx.fillText(`Par ${hole.par}  ·  ${hole.lengthFeet} ft`, cx, y + 110);
 
   // Divider
-  ctx.strokeStyle = 'rgba(90, 60, 20, 0.35)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(73, 42, 13, 0.45)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x + 14, y + headerH - 6);
-  ctx.lineTo(x + boxW - 14, y + headerH - 6);
+  ctx.moveTo(x + 22, y + headerH - 7);
+  ctx.lineTo(x + boxW - 22, y + headerH - 7);
   ctx.stroke();
 
-  ctx.font = '800 12px system-ui,sans-serif';
-  ctx.fillStyle = '#6b4510';
-  ctx.fillText('WORLD BEST', cx, y + headerH + 10);
+  ctx.font = '900 18px system-ui,sans-serif';
+  ctx.fillStyle = '#4b2b08';
+  ctx.fillText('WORLD BEST', cx, y + headerH + 17);
 
-  const listTop = y + headerH + 26;
+  const listTop = y + headerH + 43;
   if (topN === 0) {
-    ctx.font = '600 12px system-ui,sans-serif';
-    ctx.fillStyle = '#7a6040';
-    ctx.fillText('No scores yet — sink it!', cx, listTop + 6);
+    ctx.font = '700 17px system-ui,sans-serif';
+    ctx.fillStyle = '#5b4529';
+    ctx.fillText('No scores yet — sink it!', cx, listTop + 8);
   } else {
     ctx.textAlign = 'left';
     for (let i = 0; i < topN; i++) {
       const e = scores[i]!;
       const rowY = listTop + i * rowH;
-      const rankCol = x + 14;
-      const nameCol = x + 36;
-      const scoreCol = x + boxW - 16;
-      ctx.font = '700 12px system-ui,sans-serif';
-      ctx.fillStyle = i === 0 ? '#8b6914' : '#4a3520';
+      const rankCol = x + 22;
+      const nameCol = x + 56;
+      const scoreCol = x + boxW - 22;
+      ctx.font = '800 17px system-ui,sans-serif';
+      ctx.fillStyle = i === 0 ? '#744700' : '#4a321d';
       ctx.textAlign = 'left';
       ctx.fillText(String(e.rank), rankCol, rowY);
-      const nm = e.name.length > 12 ? e.name.slice(0, 11) + '…' : e.name;
-      ctx.font = '600 12px system-ui,sans-serif';
-      ctx.fillStyle = '#1a1208';
+      const nm = e.name.length > 14 ? e.name.slice(0, 13) + '…' : e.name;
+      ctx.font = '700 17px system-ui,sans-serif';
+      ctx.fillStyle = '#120d06';
       ctx.fillText(nm, nameCol, rowY);
       ctx.textAlign = 'right';
-      ctx.font = '800 13px system-ui,sans-serif';
-      ctx.fillStyle = '#2a1a08';
+      ctx.font = '900 19px system-ui,sans-serif';
+      ctx.fillStyle = '#231305';
       ctx.fillText(String(e.score), scoreCol, rowY);
     }
   }
