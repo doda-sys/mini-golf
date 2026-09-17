@@ -1,19 +1,20 @@
 import type { HoleDef } from '../types';
 import {
+  CURATED_HOLES,
   POOL_SIZE,
   ROUND_HOLES,
-  buildHolePool,
-  pickCourseIds,
-} from './generate';
+  curatedIds,
+  getCuratedHole,
+} from './course';
 
-/** Full catalog of 1000 procedurally generated holes (ids 1..1000). */
-export const HOLE_POOL: HoleDef[] = buildHolePool(POOL_SIZE);
+/** Catalog = the curated 9 (expandable later from these templates). */
+export const HOLE_POOL: HoleDef[] = CURATED_HOLES;
 
-/** Active 9-hole course for the current round (mutated by deal/load). */
+/** Active 9-hole course for the current round. */
 export let HOLES: HoleDef[] = [];
 
-/** Seed used for the current course deal (multiplayer sync). */
-export let courseSeed = 0;
+/** Seed kept for multiplayer message compat (course is fixed). */
+export let courseSeed = 1;
 
 /** Hole ids for the active course. */
 export let courseHoleIds: number[] = [];
@@ -21,17 +22,13 @@ export let courseHoleIds: number[] = [];
 export { POOL_SIZE, ROUND_HOLES };
 
 function holesFromIds(ids: number[]): HoleDef[] {
-  return ids.map((id) => {
-    const hole = HOLE_POOL[id - 1];
-    if (!hole) throw new Error(`Unknown hole id ${id}`);
-    return hole;
-  });
+  return ids.map((id) => getCuratedHole(id));
 }
 
-/** Deal a fresh random 9-hole course from the 1000-pool. Returns hole ids. */
+/** Load the fixed championship 9 (same order every round). */
 export function dealCourse(seed?: number): number[] {
-  courseSeed = (seed ?? ((Math.random() * 0xffffffff) >>> 0)) || 1;
-  courseHoleIds = pickCourseIds(courseSeed, ROUND_HOLES, POOL_SIZE);
+  courseSeed = (seed ?? 1) || 1;
+  courseHoleIds = curatedIds();
   HOLES = holesFromIds(courseHoleIds);
   return courseHoleIds;
 }
@@ -39,9 +36,15 @@ export function dealCourse(seed?: number): number[] {
 /** Load a course from host-synced hole ids (and optional seed). */
 export function loadCourse(ids: number[], seed?: number): void {
   if (ids.length < 1) throw new Error('Empty course');
-  courseHoleIds = ids.slice();
+  // Prefer curated ids; fall back to championship order if unknown
+  try {
+    courseHoleIds = ids.slice();
+    HOLES = holesFromIds(courseHoleIds);
+  } catch {
+    courseHoleIds = curatedIds();
+    HOLES = holesFromIds(courseHoleIds);
+  }
   courseSeed = seed ?? courseSeed;
-  HOLES = holesFromIds(courseHoleIds);
 }
 
 export function getHole(index: number): HoleDef {
@@ -50,8 +53,8 @@ export function getHole(index: number): HoleDef {
 }
 
 export function getPoolHole(id: number): HoleDef {
-  return HOLE_POOL[Math.max(0, Math.min(POOL_SIZE - 1, id - 1))];
+  return getCuratedHole(Math.max(1, Math.min(POOL_SIZE, id)));
 }
 
 // Default course so early imports have something valid
-dealCourse(42);
+dealCourse(1);

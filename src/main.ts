@@ -1,5 +1,5 @@
 import './style.css';
-import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, POOL_SIZE, ROUND_HOLES } from './levels/holes';
+import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, ROUND_HOLES } from './levels/holes';
 import { slopeStrength, windStrengthFromMph, WIND_CALM_THRESHOLD, WIND_MAX_MPH } from './levels/generate';
 import { Renderer } from './game/renderer';
 import { InputController } from './game/input';
@@ -46,7 +46,7 @@ app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, toast);
 menuScreen.append(
   el('div', { id: 'menu-decor', text: '⛳' }),
   el('h1', { class: 'logo' }, ['Fooze n Froops ', el('span', { text: 'Mini Golf' })]),
-  el('p', { class: 'tagline', text: `Solo or multiplayer · ${ROUND_HOLES} holes · from ${POOL_SIZE} · drag to aim` }),
+  el('p', { class: 'tagline', text: `Solo or multiplayer · ${ROUND_HOLES} curated holes · drag to aim` }),
 );
 
 const menuCard = el('div', { class: 'card' });
@@ -201,6 +201,7 @@ function syncBallToPlayer(p: PlayerInfo): void {
   p.ball = { ...b.pos };
   p.vel = { ...b.vel };
   p.sunk = b.sunk;
+  (p as PlayerInfo & { airHeight?: number }).airHeight = b.airHeight ?? 0;
 }
 
 function resetHolePositions(): void {
@@ -247,7 +248,7 @@ function layout(): void {
 
 function updateHud(): void {
   const hole = getHole(holeIndex);
-  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par}`;
+  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · ${hole.name} · Par ${hole.par}`;
   holePill.title = hole.name;
   const me = localPlayer();
   const st = holeStrokes.get(localId) ?? 0;
@@ -461,7 +462,7 @@ function openScorecard(final: boolean): void {
 }
 
 function startAnotherNine(): void {
-  // Fresh deal from the 1000-hole pool
+  // Replay the same curated championship 9
   const ids = dealCourse();
   holeIndex = 0;
   for (const p of players) {
@@ -891,7 +892,7 @@ function tick(ts: number): void {
       const st = (holeStrokes.get(p.id) ?? 0) + 1;
       holeStrokes.set(p.id, st);
       p.strokes[holeIndex] = st;
-      showToast(`${p.name} splashed! +1 stroke`);
+      showToast(`${p.name} hazard! +1 stroke`);
     }
     syncBallToPlayer(p);
     if (isMoving(b)) anyMoving = true;

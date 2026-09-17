@@ -19,8 +19,48 @@ export type Zone = {
   w: number;
   h: number;
   frictionMul: number; // >1 = sand/slow
-  kind: 'sand' | 'ice' | 'water';
+  kind: 'sand' | 'ice' | 'water' | 'lava';
 };
+
+/** Launch ramp: ball with enough aligned speed jumps the gap. */
+export type Ramp = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Unit launch direction (world). */
+  dir: Vec2;
+  /** Min speed (px/frame-ish) to leave the surface. */
+  minSpeed: number;
+  /** Speed boost on successful launch. */
+  boost: number;
+  /** Approximate airborne travel distance (px). */
+  gap: number;
+};
+
+export type CourseProp =
+  | {
+      kind: 'windmill';
+      x: number;
+      y: number;
+      /** Hub radius. */
+      r: number;
+      bladeLen: number;
+      /** Revolutions per second. */
+      rps: number;
+      /** Open gap half-angle (radians) between blocking blades. */
+      gapHalf: number;
+      /** Number of blades (usually 4). */
+      blades?: number;
+    }
+  | {
+      kind: 'volcano';
+      x: number;
+      y: number;
+      r: number;
+    }
+  | { kind: 'rock'; x: number; y: number; r: number }
+  | { kind: 'sign'; x: number; y: number; text: string };
 
 export type HoleThemeId =
   | 'tropical'
@@ -65,6 +105,8 @@ export type HoleDef = {
   id: number;
   name: string;
   par: number;
+  /** Tee→cup path length in feet (display). */
+  lengthFeet: number;
   /** Axis-aligned bounds used for camera / layout (green polygon lives inside). */
   width: number;
   height: number;
@@ -76,6 +118,8 @@ export type HoleDef = {
   walls: Wall[];
   bumpers: Bumper[];
   zones: Zone[];
+  ramps: Ramp[];
+  props: CourseProp[];
   /** Visual theme for surroundings outside the green */
   theme: HoleThemeId;
   /** Grass fill style (deterministic from hole id). */
@@ -83,21 +127,20 @@ export type HoleDef = {
   /**
    * Unit wind direction (blowing toward). Calm holes still set a direction
    * with windMph === 0 so the compass can show 0 mph.
-   * Deterministic from hole id for multiplayer sync.
    */
   wind: Vec2;
   /** Wind speed in mph, inclusive 0–25. */
   windMph: number;
   /**
    * Height field for green break. Visual topo map and physics use the same field.
-   * Deterministic from hole id.
    */
   topo: GreenTopo;
   /**
    * @deprecated Prefer topo — kept as average downhill for HUD hints.
-   * Constant gravity-like vector derived from topo tilt.
    */
   slope: Vec2;
+  /** Design tags for UI / debugging. */
+  features?: string[];
 };
 
 export type PlayerInfo = {

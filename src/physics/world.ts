@@ -1,4 +1,4 @@
-import type { Bumper, HoleDef, Vec2, Wall, Zone } from '../types';
+import type { Bumper, CourseProp, HoleDef, Ramp, Vec2, Wall, Zone } from '../types';
 import { add, clamp, dist, dot, len, scale, sub } from './math';
 import { polyBounds, sampleDownhill } from '../levels/topo';
 import { WIND_MAX_MPH } from '../levels/generate';
@@ -16,16 +16,20 @@ export const CUP_DAMP = 0.82;
 /** Max fraction of cup radius for "deep" residence capture. */
 export const CUP_DEEP_FRAC = 0.9;
 /**
- * Crosswind at full 25 mph — noticeable curve, still playable (not drastic).
- * Effective force scales by (windMph / 25).
+ * Crosswind at full 25 mph — readable but secondary to topo break.
  */
-export const WIND_CROSS = 0.030;
+export const WIND_CROSS = 0.016;
 /** Weaker along-track wind (head/tail). */
-export const WIND_ALONG = 0.008;
+export const WIND_ALONG = 0.0045;
 /** Speed (px/frame-ish) at which wind reaches full strength. Weaker near stop. */
 export const WIND_SPEED_REF = 7.5;
-/** Downhill accel scale for topo gradient (gentle, readable break). */
-export const SLOPE_ACCEL = 0.055;
+/**
+ * Downhill accel scale for topo gradient.
+ * Tuned so meaningful break dominates wind on typical putts.
+ */
+export const SLOPE_ACCEL = 0.125;
+/** Max downhill gradient magnitude applied per sample (world). */
+export const SLOPE_GRAD_CAP = 0.085;
 
 export type BallState = {
   pos: Vec2;
@@ -35,6 +39,12 @@ export type BallState = {
   hazard?: boolean;
   /** Consecutive substeps with center deep inside the cup. */
   cupResidence?: number;
+  /** Remaining airborne time (seconds). */
+  airborne?: number;
+  /** Visual hop height 0–1 while airborne. */
+  airHeight?: number;
+  /** Suppress re-triggering the same ramp until clear. */
+  rampCooldown?: number;
 };
 
 function circleAabbResolve(cx: number, cy: number, r: number, wall: Wall): Vec2 | null {
@@ -150,7 +160,6 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
     const dy = cy - c.y;
     const d = Math.hypot(dx, dy);
 
-    // Edge tangent → outward candidate (perp). Pick inward via centroid test.
     const ex = b.x - a.x;
     const ey = b.y - a.y;
     let nx = -ey;
@@ -158,19 +167,16 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
     const nl = Math.hypot(nx, ny) || 1;
     nx /= nl;
     ny /= nl;
-    // Midpoint + normal should go toward outside; flip if midpoint+normal is still inside.
     const mx = (a.x + b.x) / 2 + nx * 2;
     const my = (a.y + b.y) / 2 + ny * 2;
     if (pointInPoly(mx, my, green)) {
       nx = -nx;
       ny = -ny;
     }
-    // Inward normal is opposite of outward
     const inx = -nx;
     const iny = -ny;
 
     if (!inside) {
-      // Outside: push toward closest edge along inward direction
       if (d < bestD) {
         bestD = d;
         bestNx = inx;
@@ -187,9 +193,7 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
 
   if (bestOverlap <= 0 || !Number.isFinite(bestOverlap)) return;
 
-  // If outside, move onto edge then inset by radius
   if (!inside) {
-    // Find closest edge point and place ball inside
     let nearest = { x: cx, y: cy };
     let nd = Infinity;
     for (let i = 0; i < green.length; i++) {
@@ -211,13 +215,6 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
   ball.vel = reflectVelocity(ball.vel, { x: bestNx, y: bestNy });
 }
 
-/**
- * Energy-safe cup capture:
- * - Heavy damping while center is over the cup (no unbounded pull that adds KE).
- * - Keep/attract only the component toward the cup center (clamped so speed never increases).
- * - Sink when slow enough OR after brief residence deep in the cup.
- * - Fast skims can rim out without magically accelerating away.
- */
 function applyCupCapture(ball: BallState, hole: HoleDef): boolean {
   if (ball.sunk) return true;
 
@@ -259,10 +256,108 @@ function applyCupCapture(ball: BallState, hole: HoleDef): boolean {
     ball.pos = { x: hole.cup.x, y: hole.cup.y };
     ball.vel = { x: 0, y: 0 };
     ball.cupResidence = 0;
+    ball.airborne = 0;
+    ball.airHeight = 0;
     return true;
   }
 
   return false;
+}
+
+function inRamp(ball: BallState, ramp: Ramp): boolean {
+  return (
+    ball.pos.x >= ramp.x &&
+    ball.pos.x <= ramp.x + ramp.w &&
+    ball.pos.y >= ramp.y &&
+    ball.pos.y <= ramp.y + ramp.h
+  );
+}
+
+function tryLaunchRamp(ball: BallState, ramp: Ramp): void {
+  if ((ball.airborne ?? 0) > 0) return;
+  if ((ball.rampCooldown ?? 0) > 0) return;
+  if (!inRamp(ball, ramp)) return;
+  const speed = len(ball.vel);
+  if (speed < ramp.minSpeed) return;
+  const inv = 1 / speed;
+  const align = ball.vel.x * inv * ramp.dir.x + ball.vel.y * inv * ramp.dir.y;
+  if (align < 0.55) return;
+  // Launch
+  const launchSpeed = Math.max(speed * ramp.boost, ramp.minSpeed * 1.05);
+  ball.vel = scale(ramp.dir, launchSpeed);
+  const airT = Math.max(0.22, ramp.gap / (launchSpeed * 60));
+  ball.airborne = airT;
+  ball.airHeight = 1;
+  ball.rampCooldown = airT + 0.35;
+}
+
+/** Rotating windmill blades as thin colliding segments (gap is passable). */
+function collideWindmills(ball: BallState, props: CourseProp[], nowSec: number): void {
+  for (const p of props) {
+    if (p.kind !== 'windmill') continue;
+    const blades = p.blades ?? 4;
+    const base = nowSec * p.rps * Math.PI * 2;
+    const bladeHalf = 0.14; // rad thickness approx via point test
+    for (let i = 0; i < blades; i++) {
+      const ang = base + (i * Math.PI * 2) / blades;
+      // Gap centered between blades — skip if ball is in open sector near hub
+      const toBall = Math.atan2(ball.pos.y - p.y, ball.pos.x - p.x);
+      let dAng = toBall - ang;
+      while (dAng > Math.PI) dAng -= Math.PI * 2;
+      while (dAng < -Math.PI) dAng += Math.PI * 2;
+      // Open gap is opposite each blade? Actually gapHalf is open around angles between blades
+      // Treat blade as blocking when |dAng| < blade half-width; gap is the rest near hub only
+      if (Math.abs(dAng) > bladeHalf + 0.08) continue;
+
+      const distHub = Math.hypot(ball.pos.x - p.x, ball.pos.y - p.y);
+      if (distHub < p.r * 0.85 || distHub > p.bladeLen + ball.radius) continue;
+
+      // Push off blade along perpendicular to blade axis
+      const bx = Math.cos(ang);
+      const by = Math.sin(ang);
+      // Closest point on blade segment
+      const t = clamp(
+        ((ball.pos.x - p.x) * bx + (ball.pos.y - p.y) * by),
+        p.r,
+        p.bladeLen,
+      );
+      const cx = p.x + bx * t;
+      const cy = p.y + by * t;
+      const dx = ball.pos.x - cx;
+      const dy = ball.pos.y - cy;
+      const d = Math.hypot(dx, dy);
+      const thick = 10;
+      if (d >= ball.radius + thick || d < 1e-6) continue;
+      const nx = dx / d;
+      const ny = dy / d;
+      const overlap = ball.radius + thick - d;
+      ball.pos = { x: ball.pos.x + nx * overlap, y: ball.pos.y + ny * overlap };
+      ball.vel = reflectVelocity(ball.vel, { x: nx, y: ny }, 0.65);
+    }
+  }
+}
+
+/** Volcano hub acts as a solid rock circle. */
+function collideVolcanoHub(ball: BallState, props: CourseProp[]): void {
+  for (const p of props) {
+    if (p.kind !== 'volcano' && p.kind !== 'rock') continue;
+    const hubR = p.kind === 'volcano' ? p.r * 0.55 : p.r;
+    const d = Math.hypot(ball.pos.x - p.x, ball.pos.y - p.y);
+    const minD = ball.radius + hubR;
+    if (d >= minD || d < 1e-6) continue;
+    const n = { x: (ball.pos.x - p.x) / d, y: (ball.pos.y - p.y) / d };
+    ball.pos = { x: p.x + n.x * (minD + 0.5), y: p.y + n.y * (minD + 0.5) };
+    ball.vel = reflectVelocity(ball.vel, n, 0.7);
+  }
+}
+
+function resetHazard(ball: BallState, hole: HoleDef): void {
+  ball.pos = { x: hole.tee.x, y: hole.tee.y };
+  ball.vel = { x: 0, y: 0 };
+  ball.hazard = true;
+  ball.cupResidence = 0;
+  ball.airborne = 0;
+  ball.airHeight = 0;
 }
 
 export function createBall(tee: Vec2): BallState {
@@ -272,11 +367,14 @@ export function createBall(tee: Vec2): BallState {
     sunk: false,
     radius: BALL_RADIUS,
     cupResidence: 0,
+    airborne: 0,
+    airHeight: 0,
+    rampCooldown: 0,
   };
 }
 
 export function isMoving(ball: BallState): boolean {
-  return !ball.sunk && len(ball.vel) > MIN_SPEED;
+  return !ball.sunk && (len(ball.vel) > MIN_SPEED || (ball.airborne ?? 0) > 0);
 }
 
 export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
@@ -284,24 +382,36 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
 
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
   const h = dt / steps;
-  const green = hole.green?.length >= 3 ? hole.green : [
-    { x: 0, y: 0 },
-    { x: hole.width, y: 0 },
-    { x: hole.width, y: hole.height },
-    { x: 0, y: hole.height },
-  ];
+  const green =
+    hole.green?.length >= 3
+      ? hole.green
+      : [
+          { x: 0, y: 0 },
+          { x: hole.width, y: 0 },
+          { x: hole.width, y: hole.height },
+          { x: 0, y: hole.height },
+        ];
+  const nowSec = performance.now() / 1000;
+  const props = hole.props ?? [];
+  const ramps = hole.ramps ?? [];
 
   for (let i = 0; i < steps; i++) {
     if (ball.sunk) return;
 
+    if ((ball.rampCooldown ?? 0) > 0) {
+      ball.rampCooldown = Math.max(0, (ball.rampCooldown ?? 0) - h);
+    }
+
+    const flying = (ball.airborne ?? 0) > 0;
+
     // Green break from height field (same field as the Green Map overlay).
-    if (hole.topo) {
+    // Stronger than wind; skipped while airborne.
+    if (!flying && hole.topo) {
       const bounds = polyBounds(green);
       const downhill = sampleDownhill(hole.topo, ball.pos.x, ball.pos.y, bounds);
       const dm = Math.hypot(downhill.x, downhill.y);
       if (dm > 1e-8) {
-        // Cap so steep spots stay playable
-        const capped = Math.min(dm, 0.045);
+        const capped = Math.min(dm, SLOPE_GRAD_CAP);
         const sx = (downhill.x / dm) * capped;
         const sy = (downhill.y / dm) * capped;
         ball.vel = {
@@ -309,15 +419,15 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
           y: ball.vel.y + sy * SLOPE_ACCEL * h * 60,
         };
       }
-    } else if (hole.slope && (hole.slope.x !== 0 || hole.slope.y !== 0)) {
-      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_ACCEL * 0.5 * h * 60));
+    } else if (!flying && hole.slope && (hole.slope.x !== 0 || hole.slope.y !== 0)) {
+      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_ACCEL * 0.55 * h * 60));
     }
 
-    // Wind: mph 0–25 maps linearly; at 25 mph effect is gentle but readable.
+    // Wind secondary to topo; none while airborne.
     const speedBefore = len(ball.vel);
     const mph = hole.windMph ?? 0;
     const wind = hole.wind;
-    if (speedBefore > MIN_SPEED && mph > 0 && wind) {
+    if (!flying && speedBefore > MIN_SPEED && mph > 0 && wind) {
       const windFactor = Math.min(1, mph / WIND_MAX_MPH);
       const invSp = 1 / speedBefore;
       const tx = ball.vel.x * invSp;
@@ -334,32 +444,66 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
       };
     }
 
-    ball.pos = add(ball.pos, scale(ball.vel, h * 60));
-
-    collideGreenBoundary(ball, green);
-    collideWalls(ball, hole.walls);
-    for (const bumper of hole.bumpers) collideBumper(ball, bumper);
-
-    const zone = zoneAt(hole.zones, ball.pos);
-    let friction = FRICTION;
-    if (zone) {
-      if (zone.kind === 'water') {
-        ball.pos = { x: hole.tee.x, y: hole.tee.y };
-        ball.vel = { x: 0, y: 0 };
-        ball.hazard = true;
-        ball.cupResidence = 0;
-        return;
-      }
-      friction = Math.pow(FRICTION, zone.frictionMul);
-      if (zone.kind === 'ice') friction = 0.994;
+    // Ramp launch check (grounded only)
+    if (!flying) {
+      for (const ramp of ramps) tryLaunchRamp(ball, ramp);
     }
 
-    ball.vel = scale(ball.vel, Math.pow(friction, h * 60));
+    ball.pos = add(ball.pos, scale(ball.vel, h * 60));
+
+    if (flying) {
+      ball.airborne = Math.max(0, (ball.airborne ?? 0) - h);
+      const t = ball.airborne ?? 0;
+      // Parabolic hop visual
+      const totalGuess = 0.45;
+      const u = Math.min(1, 1 - t / totalGuess);
+      ball.airHeight = Math.max(0, 4 * u * (1 - u));
+      // Light air drag
+      ball.vel = scale(ball.vel, Math.pow(0.995, h * 60));
+      // Still bounce off solid hubs / windmill while in air (fair)
+      collideVolcanoHub(ball, props);
+      collideWindmills(ball, props, nowSec);
+
+      if ((ball.airborne ?? 0) <= 0) {
+        ball.airHeight = 0;
+        // Landing check — fair failure into water/lava/off-green/sand deep
+        if (!pointInPoly(ball.pos.x, ball.pos.y, green)) {
+          resetHazard(ball, hole);
+          return;
+        }
+        const landZone = zoneAt(hole.zones, ball.pos);
+        if (landZone && (landZone.kind === 'water' || landZone.kind === 'lava')) {
+          resetHazard(ball, hole);
+          return;
+        }
+        // Soft sand landing just slows — ok
+      }
+    } else {
+      ball.airHeight = 0;
+      collideGreenBoundary(ball, green);
+      collideWalls(ball, hole.walls);
+      for (const bumper of hole.bumpers) collideBumper(ball, bumper);
+      collideVolcanoHub(ball, props);
+      collideWindmills(ball, props, nowSec);
+
+      const z = zoneAt(hole.zones, ball.pos);
+      let friction = FRICTION;
+      if (z) {
+        if (z.kind === 'water' || z.kind === 'lava') {
+          resetHazard(ball, hole);
+          return;
+        }
+        friction = Math.pow(FRICTION, z.frictionMul);
+        if (z.kind === 'ice') friction = 0.994;
+      }
+
+      ball.vel = scale(ball.vel, Math.pow(friction, h * 60));
+    }
 
     if (applyCupCapture(ball, hole)) return;
 
     const speed = len(ball.vel);
-    if (speed < MIN_SPEED) {
+    if (speed < MIN_SPEED && (ball.airborne ?? 0) <= 0) {
       ball.vel = { x: 0, y: 0 };
     }
   }

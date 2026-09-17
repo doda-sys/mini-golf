@@ -1,4 +1,4 @@
-import type { GrassPattern, HoleDef, PlayerInfo, Vec2, Zone } from '../types';
+import type { CourseProp, GrassPattern, HoleDef, PlayerInfo, Ramp, Vec2, Zone } from '../types';
 import { BALL_RADIUS } from '../physics/world';
 import { len } from '../physics/math';
 import { THEMES, type HoleTheme } from '../levels/themes';
@@ -17,7 +17,7 @@ const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
 
 /** World-space padding around the playable green for themed surroundings. */
-export const THEME_PAD = 56;
+export const THEME_PAD = 72;
 
 export type AimPreview = {
   from: Vec2;
@@ -120,6 +120,12 @@ export class Renderer {
     // Large wind key outside the putting green (always, including 0 mph)
     drawWindKey(ctx, hole, green, pad);
 
+    // Hole plaque outside the green (number, name, par, length)
+    drawHolePlaque(ctx, hole, green, pad);
+
+    // Ramps (under zones visually but readable)
+    for (const ramp of hole.ramps ?? []) drawRamp(ctx, ramp);
+
     // Zones (hazards) — clipped to green visually via draw order
     ctx.save();
     pathPoly(ctx, green);
@@ -133,6 +139,8 @@ export class Renderer {
     for (const w of hole.walls) {
       drawWall(ctx, w.x, w.y, w.w, w.h, theme);
     }
+
+    for (const prop of hole.props ?? []) drawCourseProp(ctx, prop, performance.now() / 1000);
 
     drawThemeTrim(ctx, hole, theme, green);
 
@@ -162,19 +170,29 @@ export class Renderer {
     for (const p of sorted) {
       if (p.sunk) ctx.globalAlpha = 0.35;
       const r = BALL_RADIUS;
-      const g = ctx.createRadialGradient(p.ball.x - 3, p.ball.y - 3, 1, p.ball.x, p.ball.y, r);
+      const hop = (p as PlayerInfo & { airHeight?: number }).airHeight ?? 0;
+      const lift = hop * 16;
+      const drawX = p.ball.x;
+      const drawY = p.ball.y - lift;
+      if (hop > 0.05) {
+        ctx.fillStyle = `rgba(0,0,0,${0.22 + hop * 0.2})`;
+        ctx.beginPath();
+        ctx.ellipse(p.ball.x, p.ball.y + 2, r * (1.15 - hop * 0.35), r * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const g = ctx.createRadialGradient(drawX - 3, drawY - 3, 1, drawX, drawY, r);
       g.addColorStop(0, '#ffffff');
       g.addColorStop(0.35, p.color);
       g.addColorStop(1, shade(p.color, -40));
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(p.ball.x, p.ball.y, r, 0, Math.PI * 2);
+      ctx.arc(drawX, drawY, r * (1 + hop * 0.18), 0, Math.PI * 2);
       ctx.fill();
       if (highlightId === p.id) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(p.ball.x, p.ball.y, r + 4, 0, Math.PI * 2);
+        ctx.arc(drawX, drawY, r + 4, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
@@ -183,12 +201,12 @@ export class Renderer {
       const label = p.name;
       ctx.font = '600 11px system-ui,sans-serif';
       const tw = ctx.measureText(label).width;
-      roundRect(ctx, p.ball.x - tw / 2 - 4, p.ball.y - r - 22, tw + 8, 14, 4);
+      roundRect(ctx, drawX - tw / 2 - 4, drawY - r - 22, tw + 8, 14, 4);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, p.ball.x, p.ball.y - r - 15);
+      ctx.fillText(label, drawX, drawY - r - 15);
     }
 
     for (const p of players) {
@@ -1010,6 +1028,31 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
       ctx.quadraticCurveTo(z.x + z.w * 0.66, yy - 5, z.x + z.w - 6, yy);
       ctx.stroke();
     }
+
+  } else if (z.kind === 'lava') {
+    ctx.fillStyle = 'rgba(40,0,0,0.35)';
+    roundRect(ctx, z.x + 2, z.y + 3, z.w, z.h, r);
+    ctx.fill();
+    const g = ctx.createLinearGradient(z.x, z.y, z.x, z.y + z.h);
+    g.addColorStop(0, '#ffb347');
+    g.addColorStop(0.35, '#ff4500');
+    g.addColorStop(0.7, '#cc2200');
+    g.addColorStop(1, '#5a0a0a');
+    ctx.fillStyle = g;
+    roundRect(ctx, z.x, z.y, z.w, z.h, r);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 220, 80, 0.45)';
+    for (let i = 0; i < 8; i++) {
+      const sx = z.x + 8 + ((i * 37) % Math.max(1, z.w - 16));
+      const sy = z.y + 8 + ((i * 53) % Math.max(1, z.h - 16));
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2 + (i % 3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255, 180, 60, 0.7)';
+    ctx.lineWidth = 2.5;
+    roundRect(ctx, z.x, z.y, z.w, z.h, r);
+    ctx.stroke();
   }
 }
 
@@ -1328,4 +1371,224 @@ function shade(hex: string, amt: number): string {
   const g = Math.max(0, Math.min(255, ((num >> 8) & 255) + amt));
   const b = Math.max(0, Math.min(255, (num & 255) + amt));
   return `rgb(${r},${g},${b})`;
+}
+
+
+function drawHolePlaque(
+  ctx: CanvasRenderingContext2D,
+  hole: HoleDef,
+  green: Vec2[],
+  pad: number,
+): void {
+  const { minX, minY, maxX, maxY } = polyBounds(green);
+  // Prefer left pad, mid-height — clearly outside green
+  let x = Math.max(-pad + 8, minX - 118);
+  let y = Math.min(Math.max(minY + 20, 40), maxY - 80);
+  x = Math.max(-pad + 6, Math.min(hole.width + pad - 130, x));
+  y = Math.max(-pad + 10, Math.min(hole.height + pad - 100, y));
+
+  const boxW = 122;
+  const boxH = 86;
+  ctx.save();
+  // Post
+  ctx.fillStyle = '#5c4033';
+  ctx.fillRect(x + boxW / 2 - 4, y + boxH - 4, 8, 22);
+  // Plaque body
+  const g = ctx.createLinearGradient(x, y, x, y + boxH);
+  g.addColorStop(0, '#f0e6d0');
+  g.addColorStop(1, '#d4c4a0');
+  ctx.fillStyle = g;
+  roundRect(ctx, x, y, boxW, boxH, 8);
+  ctx.fill();
+  ctx.strokeStyle = '#8b6914';
+  ctx.lineWidth = 3;
+  roundRect(ctx, x, y, boxW, boxH, 8);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x + 4, y + 4, boxW - 8, boxH - 8, 5);
+  ctx.stroke();
+
+  ctx.fillStyle = '#3a2a14';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 12px system-ui,sans-serif';
+  ctx.fillText(`HOLE ${hole.id}`, x + boxW / 2, y + 16);
+  ctx.font = 'bold 13px system-ui,sans-serif';
+  // Wrap name if long
+  const name = hole.name;
+  ctx.font = '700 12px system-ui,sans-serif';
+  ctx.fillStyle = '#1a1208';
+  if (ctx.measureText(name).width > boxW - 12) {
+    ctx.font = '700 10px system-ui,sans-serif';
+  }
+  ctx.fillText(name, x + boxW / 2, y + 36);
+  ctx.font = '600 12px system-ui,sans-serif';
+  ctx.fillStyle = '#4a3520';
+  ctx.fillText(`Par ${hole.par}`, x + boxW / 2, y + 54);
+  ctx.font = '600 11px system-ui,sans-serif';
+  ctx.fillStyle = '#5a4530';
+  ctx.fillText(`${hole.lengthFeet} ft`, x + boxW / 2, y + 72);
+  ctx.restore();
+}
+
+function drawRamp(ctx: CanvasRenderingContext2D, ramp: Ramp): void {
+  ctx.save();
+  const g = ctx.createLinearGradient(ramp.x, ramp.y + ramp.h, ramp.x, ramp.y);
+  g.addColorStop(0, '#6b7280');
+  g.addColorStop(0.5, '#9ca3af');
+  g.addColorStop(1, '#d1d5db');
+  ctx.fillStyle = g;
+  roundRect(ctx, ramp.x, ramp.y, ramp.w, ramp.h, 8);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  roundRect(ctx, ramp.x, ramp.y, ramp.w, ramp.h, 8);
+  ctx.stroke();
+  // Direction chevrons
+  const cx = ramp.x + ramp.w / 2;
+  const cy = ramp.y + ramp.h / 2;
+  const dx = ramp.dir.x;
+  const dy = ramp.dir.y;
+  ctx.strokeStyle = 'rgba(255, 220, 100, 0.9)';
+  ctx.fillStyle = 'rgba(255, 200, 60, 0.35)';
+  ctx.lineWidth = 2;
+  for (let i = -1; i <= 1; i++) {
+    const ox = cx + dx * i * 10;
+    const oy = cy + dy * i * 10;
+    drawChevron(ctx, ox, oy, dx, dy, 7);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.font = 'bold 9px system-ui,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RAMP', cx, ramp.y + ramp.h - 8);
+  ctx.restore();
+}
+
+function drawCourseProp(ctx: CanvasRenderingContext2D, prop: CourseProp, nowSec: number): void {
+  if (prop.kind === 'windmill') {
+    drawWindmill(ctx, prop, nowSec);
+  } else if (prop.kind === 'volcano') {
+    drawVolcano(ctx, prop, nowSec);
+  } else if (prop.kind === 'rock') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(prop.x + 2, prop.y + 3, prop.r, prop.r * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const g = ctx.createRadialGradient(prop.x - prop.r * 0.3, prop.y - prop.r * 0.3, 2, prop.x, prop.y, prop.r);
+    g.addColorStop(0, '#9a9a9a');
+    g.addColorStop(1, '#4a4a4a');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(prop.x, prop.y, prop.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else if (prop.kind === 'sign') {
+    ctx.save();
+    ctx.fillStyle = '#5c4033';
+    ctx.fillRect(prop.x - 3, prop.y, 6, 28);
+    ctx.fillStyle = '#f4d35e';
+    roundRect(ctx, prop.x - 28, prop.y - 22, 56, 22, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#8b6914';
+    ctx.lineWidth = 2;
+    roundRect(ctx, prop.x - 28, prop.y - 22, 56, 22, 4);
+    ctx.stroke();
+    ctx.fillStyle = '#3a2a14';
+    ctx.font = 'bold 10px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(prop.text, prop.x, prop.y - 11);
+    ctx.restore();
+  }
+}
+
+function drawWindmill(
+  ctx: CanvasRenderingContext2D,
+  prop: Extract<CourseProp, { kind: 'windmill' }>,
+  nowSec: number,
+): void {
+  const blades = prop.blades ?? 4;
+  const ang = nowSec * prop.rps * Math.PI * 2;
+  ctx.save();
+  // Tower
+  ctx.fillStyle = '#e8e0d0';
+  roundRect(ctx, prop.x - 14, prop.y - 8, 28, 70, 4);
+  ctx.fill();
+  ctx.strokeStyle = '#8a7a60';
+  ctx.lineWidth = 2;
+  roundRect(ctx, prop.x - 14, prop.y - 8, 28, 70, 4);
+  ctx.stroke();
+  // Hub
+  ctx.translate(prop.x, prop.y);
+  ctx.rotate(ang);
+  for (let i = 0; i < blades; i++) {
+    ctx.rotate((Math.PI * 2) / blades);
+    ctx.fillStyle = i % 2 === 0 ? '#c45c26' : '#f0e6d2';
+    ctx.strokeStyle = '#3a2a14';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(prop.r * 0.4, -7);
+    ctx.lineTo(prop.bladeLen, -11);
+    ctx.lineTo(prop.bladeLen, 11);
+    ctx.lineTo(prop.r * 0.4, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(0, 0, prop.r, 0, Math.PI * 2);
+  ctx.fillStyle = '#5c4033';
+  ctx.fill();
+  ctx.strokeStyle = '#f4d35e';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawVolcano(
+  ctx: CanvasRenderingContext2D,
+  prop: Extract<CourseProp, { kind: 'volcano' }>,
+  nowSec: number,
+): void {
+  ctx.save();
+  const r = prop.r;
+  // Cone
+  ctx.beginPath();
+  ctx.moveTo(prop.x - r, prop.y + r * 0.55);
+  ctx.lineTo(prop.x, prop.y - r * 0.85);
+  ctx.lineTo(prop.x + r, prop.y + r * 0.55);
+  ctx.closePath();
+  const cone = ctx.createLinearGradient(prop.x, prop.y - r, prop.x, prop.y + r);
+  cone.addColorStop(0, '#3a2018');
+  cone.addColorStop(0.5, '#5a3028');
+  cone.addColorStop(1, '#2a1510');
+  ctx.fillStyle = cone;
+  ctx.fill();
+  ctx.strokeStyle = '#1a0c0a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Crater glow
+  const pulse = 0.55 + Math.sin(nowSec * 4) * 0.2;
+  const glow = ctx.createRadialGradient(prop.x, prop.y - r * 0.35, 2, prop.x, prop.y - r * 0.2, r * 0.45);
+  glow.addColorStop(0, `rgba(255, 220, 80, ${pulse})`);
+  glow.addColorStop(0.4, `rgba(255, 80, 0, ${pulse * 0.9})`);
+  glow.addColorStop(1, 'rgba(80, 0, 0, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(prop.x, prop.y - r * 0.3, r * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // Overflow rivulets
+  ctx.strokeStyle = `rgba(255, 100, 20, ${0.5 + pulse * 0.3})`;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(prop.x + side * 8, prop.y - r * 0.25);
+    ctx.quadraticCurveTo(prop.x + side * r * 0.45, prop.y + 4, prop.x + side * r * 0.7, prop.y + r * 0.45);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
