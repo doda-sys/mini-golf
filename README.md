@@ -28,7 +28,7 @@ Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent
 4. Hit **ramps** with enough speed/aim to jump gaps — failed landings splash or reset fairly.
 5. Wind still affects putts subtly when present (no on-screen wind meter).
 6. Toggle **Green Map / Topo** for StrackaLine-style contours, downhill ticks, and elevation heatmap (**same height field as physics**).
-7. Read the **themed hole plaque** (corner overlay outside the green): number, full name, par, length, plus **WORLD BEST** per-hole scores.
+7. Read the **themed hole plaque** under the green (compact strip; tap to expand): number, full name, par, length, plus **WORLD BEST** per-hole scores.
 8. Pick your **ball color** on the start menu (White / Highlighter yellow / Pink / Galactic) — saved for next time.
 9. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
 10. The **start menu** shows a live **top-scores preview** from the worldwide board; open **Full leaderboard** for everyone. Ties: first recorded score at that stroke total ranks higher (client sorts by strokes, then timestamp when the Scores API provides one).
@@ -70,6 +70,7 @@ Live URL: https://doda-sys.github.io/mini-golf/
 | `src/levels/course.ts` | Curated championship 9 (large fairways) |
 | `src/levels/topo.ts` | Height field (map + physics, char-length scaled) |
 | `src/levels/themes.ts` | Themed surrounds |
-| `src/game/renderer.ts` | Canvas, plaque, wind key, green-book map, props |
+| `src/game/renderer.ts` | Canvas fairway render, green-book map, props |
 | `src/net/peer.ts` | Trystero P2P |
+| `src/plaques.css` | Designer under-green hole plaques |
 | `src/main.ts` | UI + game loop |
