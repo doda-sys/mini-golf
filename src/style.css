@@ -680,3 +680,314 @@ label {
 .ball-color-btn.selected .ball-swatch-label {
   color: var(--text);
 }
+
+/* ---- In-game HUD polish (compact, fairway-first) ---- */
+#hud {
+  gap: 6px 8px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.hud-pill {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+#canvas-wrap {
+  /* Plaque is positioned inside this relative container */
+  isolation: isolate;
+}
+
+/* ---- Hole plaque (HTML overlay, unique per theme) ---- */
+.hole-plaque {
+  position: absolute;
+  z-index: 6;
+  width: min(168px, 42vw);
+  max-width: 180px;
+  pointer-events: auto;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
+  transition: transform 0.18s ease, opacity 0.18s ease;
+  user-select: none;
+}
+
+.hole-plaque .plaque-toggle {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.hole-plaque .plaque-body {
+  position: relative;
+  padding: 12px 12px 10px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.hole-plaque .plaque-ornament {
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1;
+  margin-bottom: 4px;
+  opacity: 0.95;
+}
+
+.hole-plaque .plaque-hole-num {
+  text-align: center;
+  font-weight: 900;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.hole-plaque .plaque-title {
+  text-align: center;
+  font-weight: 900;
+  font-size: 0.92rem;
+  line-height: 1.15;
+  margin: 4px 0 2px;
+  text-wrap: balance;
+}
+
+.hole-plaque .plaque-meta {
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.72rem;
+  opacity: 0.88;
+  margin-bottom: 6px;
+}
+
+.hole-plaque .plaque-lb-label {
+  text-align: center;
+  font-weight: 900;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  margin: 4px 0 4px;
+  opacity: 0.85;
+}
+
+.hole-plaque .plaque-lb {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hole-plaque .plaque-lb li {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 4px;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.hole-plaque .plaque-lb li .rk { opacity: 0.7; font-weight: 800; }
+.hole-plaque .plaque-lb li .sc { font-weight: 900; font-variant-numeric: tabular-nums; }
+.hole-plaque .plaque-lb li.best .nm,
+.hole-plaque .plaque-lb li.best .sc { color: inherit; filter: brightness(1.15); }
+.hole-plaque .plaque-lb-empty {
+  display: block !important;
+  text-align: center;
+  font-size: 0.68rem;
+  opacity: 0.75;
+  font-weight: 600;
+}
+
+/* Collapsed: slim chip so fairway stays king on phones */
+.hole-plaque.collapsed {
+  width: auto;
+  max-width: min(150px, 46vw);
+}
+.hole-plaque.collapsed .plaque-body {
+  padding: 8px 28px 8px 10px;
+}
+.hole-plaque.collapsed .plaque-ornament,
+.hole-plaque.collapsed .plaque-lb-label,
+.hole-plaque.collapsed .plaque-lb,
+.hole-plaque.collapsed .plaque-meta {
+  display: none;
+}
+.hole-plaque.collapsed .plaque-hole-num {
+  font-size: 0.65rem;
+}
+.hole-plaque.collapsed .plaque-title {
+  font-size: 0.78rem;
+  margin: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.hole-plaque.expanded {
+  width: min(172px, 48vw);
+}
+
+@media (min-width: 720px) {
+  /* Desktop: show full ornate plaque by default */
+  .hole-plaque.collapsed .plaque-ornament,
+  .hole-plaque.collapsed .plaque-lb-label,
+  .hole-plaque.collapsed .plaque-lb,
+  .hole-plaque.collapsed .plaque-meta {
+    display: revert;
+  }
+  .hole-plaque.collapsed {
+    width: min(168px, 28vw);
+    max-width: 180px;
+  }
+  .hole-plaque.collapsed .plaque-body {
+    padding: 12px 12px 10px;
+  }
+  .hole-plaque.collapsed .plaque-title {
+    white-space: normal;
+    max-width: none;
+    font-size: 0.92rem;
+  }
+}
+
+/* Theme: Tropical — bamboo / palm */
+.hole-plaque.plaque-tropical .plaque-body {
+  background: linear-gradient(160deg, #1a6b52 0%, #0d3f32 55%, #0a2e25 100%);
+  border: 3px solid #f4d35e;
+  border-radius: 18px 18px 22px 22px;
+  color: #f4fff8;
+  box-shadow: inset 0 0 0 2px rgba(255, 107, 157, 0.35), 0 0 0 1px #0a3d30;
+}
+.hole-plaque.plaque-tropical .plaque-title { color: #ffd96a; }
+.hole-plaque.plaque-tropical .plaque-lb-label { color: #ff6b9d; }
+
+/* Theme: Autumn — leaf parchment */
+.hole-plaque.plaque-autumn .plaque-body {
+  background: linear-gradient(165deg, #f3d5a2 0%, #d9964a 45%, #8a3b12 100%);
+  border: 3px solid #5c2a0c;
+  border-radius: 40% 16px 28% 16px / 22% 30px 18% 30px;
+  color: #2a1408;
+  box-shadow: inset 0 0 0 2px rgba(255, 220, 160, 0.5);
+}
+.hole-plaque.plaque-autumn .plaque-title { color: #5c1f05; }
+.hole-plaque.plaque-autumn .plaque-lb-label { color: #8a2f0a; }
+
+/* Theme: Castle / windmill — stone tablet */
+.hole-plaque.plaque-castle .plaque-body {
+  background: linear-gradient(180deg, #9aa3b2 0%, #6b7382 40%, #4a5160 100%);
+  border: 4px solid #c9a227;
+  border-radius: 6px;
+  color: #f4f0e4;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.2), 0 0 0 1px #2a303c;
+  background-image: linear-gradient(180deg, #9aa3b2 0%, #6b7382 40%, #4a5160 100%),
+    repeating-linear-gradient(90deg, transparent 0 14px, rgba(0,0,0,0.08) 14px 15px);
+}
+.hole-plaque.plaque-castle .plaque-title { color: #ffe08a; text-shadow: 0 1px 0 #3a3010; }
+
+/* Theme: Neon arcade */
+.hole-plaque.plaque-neon .plaque-body {
+  background: linear-gradient(145deg, #1a0f2e, #12081f 60%, #0a0614);
+  border: 2px solid #00f5ff;
+  border-radius: 4px;
+  color: #e8f7ff;
+  box-shadow: 0 0 12px rgba(255, 0, 170, 0.55), inset 0 0 18px rgba(0, 245, 255, 0.12);
+}
+.hole-plaque.plaque-neon .plaque-title {
+  color: #ff00aa;
+  text-shadow: 0 0 8px rgba(255, 0, 170, 0.8);
+}
+.hole-plaque.plaque-neon .plaque-lb-label { color: #00f5ff; letter-spacing: 0.18em; }
+.hole-plaque.plaque-neon .plaque-toggle {
+  border-color: #ff00aa;
+  box-shadow: 0 0 10px rgba(255, 0, 170, 0.6);
+}
+
+/* Theme: Pirate — wood + rope */
+.hole-plaque.plaque-pirate .plaque-body {
+  background: linear-gradient(175deg, #6b4428 0%, #3e2718 55%, #24160e 100%);
+  border: 3px solid #d4a017;
+  border-radius: 12px;
+  color: #f5e6c8;
+  box-shadow: inset 0 0 0 3px #5c4033, 0 0 0 2px #1a1008;
+}
+.hole-plaque.plaque-pirate .plaque-title { color: #ffd76a; font-family: Georgia, 'Times New Roman', serif; }
+.hole-plaque.plaque-pirate .plaque-lb-label { color: #c0c0c0; }
+
+/* Theme: Desert canyon — sandstone */
+.hole-plaque.plaque-desert .plaque-body {
+  background: linear-gradient(160deg, #e8d099 0%, #c4a35a 50%, #8a6a3a 100%);
+  border: 3px solid #f0e6d2;
+  border-radius: 10px 22px 10px 22px;
+  color: #3a2810;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35), inset 0 -3px 0 rgba(80, 50, 10, 0.25);
+}
+.hole-plaque.plaque-desert .plaque-title { color: #6b3410; }
+.hole-plaque.plaque-desert .plaque-lb-label { color: #e07a3d; }
+
+/* Theme: Space — hex metal */
+.hole-plaque.plaque-space .plaque-body {
+  background: linear-gradient(160deg, #1e1b4b 0%, #0a0a1a 60%, #050510 100%);
+  border: 2px solid #67e8f9;
+  border-radius: 16px;
+  color: #e8e6ff;
+  box-shadow: 0 0 16px rgba(167, 139, 250, 0.45), inset 0 0 20px rgba(103, 232, 249, 0.08);
+  border-radius: 18px;
+}
+.hole-plaque.plaque-space .plaque-title { color: #a78bfa; text-shadow: 0 0 10px rgba(167, 139, 250, 0.7); }
+.hole-plaque.plaque-space .plaque-lb-label { color: #67e8f9; }
+
+/* Theme: Volcano — lava rock */
+.hole-plaque.plaque-volcano .plaque-body {
+  background: linear-gradient(170deg, #4a1c14 0%, #2b1410 45%, #1a0c0a 100%);
+  border: 3px solid #ff4500;
+  border-radius: 18px 18px 8px 8px;
+  color: #ffe0c8;
+  box-shadow: 0 0 14px rgba(255, 69, 0, 0.4), inset 0 -10px 24px rgba(255, 80, 0, 0.18);
+}
+.hole-plaque.plaque-volcano .plaque-title { color: #ffb347; }
+.hole-plaque.plaque-volcano .plaque-lb-label { color: #ff4500; }
+
+/* Theme: Candy — frosting swirl */
+.hole-plaque.plaque-candy .plaque-body {
+  background:
+    repeating-linear-gradient(
+      125deg,
+      #ffb6d9 0 10px,
+      #fff5b8 10px 20px,
+      #a8e6ff 20px 30px,
+      #ffb6d9 30px 40px
+    );
+  border: 4px solid #fff;
+  border-radius: 28px;
+  color: #6a2050;
+  box-shadow: inset 0 0 0 3px #d46a9a, 0 6px 0 #d46a9a;
+}
+.hole-plaque.plaque-candy .plaque-title { color: #9b2d6b; text-shadow: 0 1px 0 #fff; }
+.hole-plaque.plaque-candy .plaque-lb-label { color: #2a6a8a; }
+
+/* Theme: Arctic fallback */
+.hole-plaque.plaque-arctic .plaque-body {
+  background: linear-gradient(160deg, #f0f8ff, #8fb8d4);
+  border: 3px solid #ffffff;
+  border-radius: 14px;
+  color: #1a3344;
+}
+
+@media (max-width: 520px) {
+  #hud {
+    padding: 5px 8px;
+    gap: 5px 6px;
+  }
+}

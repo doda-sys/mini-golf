@@ -1,7 +1,7 @@
 import './style.css';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, ROUND_HOLES } from './levels/holes';
-import { slopeStrength, windStrengthFromMph, WIND_CALM_THRESHOLD, WIND_MAX_MPH } from './levels/generate';
 import { Renderer } from './game/renderer';
+import { THEMES } from './levels/themes';
 import { InputController } from './game/input';
 import {
   applyPutt,
@@ -201,23 +201,48 @@ lobbyScreen.append(lobbyCard);
 const hud = el('div', { id: 'hud' });
 const holePill = el('div', { class: 'hud-pill', text: 'Hole 1' });
 const strokesPill = el('div', { class: 'hud-pill', text: 'Strokes 0' });
-const windPill = el('div', { class: 'hud-pill wind', id: 'wind-pill', text: 'Wind —' });
 const topoBtn = el('button', {
   class: 'btn secondary topo-toggle',
   type: 'button',
   text: 'Green Map',
   title: 'Toggle green topography (contours, break arrows, steepness)',
-  style: 'padding:6px 12px;font-size:0.85rem',
+  style: 'padding:5px 10px;font-size:0.8rem',
 });
 const turnPill = el('div', { class: 'hud-pill turn', text: 'Your turn' });
 const roomPill = el('div', { class: 'hud-pill room hidden', text: '' });
 const playersBar = el('div', { id: 'players-bar' });
-const menuBackBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Menu', style: 'padding:6px 12px;font-size:0.85rem' });
-hud.append(holePill, strokesPill, windPill, topoBtn, turnPill, roomPill, playersBar, menuBackBtn);
+const menuBackBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Menu', style: 'padding:5px 10px;font-size:0.8rem' });
+hud.append(holePill, strokesPill, topoBtn, turnPill, roomPill, playersBar, menuBackBtn);
 
 const canvasWrap = el('div', { id: 'canvas-wrap' });
 const canvas = el('canvas', { id: 'game-canvas' });
-canvasWrap.append(canvas);
+
+// Themed HTML plaque — outside the green projection; tap to expand/collapse on small screens.
+const holePlaque = el('aside', { id: 'hole-plaque', class: 'hole-plaque collapsed', role: 'complementary', 'aria-label': 'Hole info' });
+const plaqueToggle = el('button', { class: 'plaque-toggle', type: 'button', title: 'Hole info', text: '⛳' });
+const plaqueBody = el('div', { class: 'plaque-body' });
+const plaqueOrnament = el('div', { class: 'plaque-ornament', 'aria-hidden': 'true' });
+const plaqueHoleNum = el('div', { class: 'plaque-hole-num', text: 'HOLE 1' });
+const plaqueTitle = el('div', { class: 'plaque-title', text: '' });
+const plaqueMeta = el('div', { class: 'plaque-meta', text: '' });
+const plaqueLbLabel = el('div', { class: 'plaque-lb-label', text: 'WORLD BEST' });
+const plaqueLb = el('ol', { class: 'plaque-lb' });
+plaqueBody.append(plaqueOrnament, plaqueHoleNum, plaqueTitle, plaqueMeta, plaqueLbLabel, plaqueLb);
+holePlaque.append(plaqueToggle, plaqueBody);
+plaqueToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  holePlaque.classList.toggle('collapsed');
+  holePlaque.classList.toggle('expanded');
+});
+plaqueBody.addEventListener('click', () => {
+  // Tap compact plaque body to expand on mobile
+  if (holePlaque.classList.contains('collapsed')) {
+    holePlaque.classList.remove('collapsed');
+    holePlaque.classList.add('expanded');
+  }
+});
+
+canvasWrap.append(canvas, holePlaque);
 gameScreen.append(hud, canvasWrap);
 
 // Score overlay content
@@ -365,54 +390,121 @@ function startSolo(): void {
 
 function layout(): void {
   renderer.resize(getHole(holeIndex));
+  updateHolePlaque(true);
+}
+
+let plaqueContentKey = '';
+
+function updateHolePlaque(force = false): void {
+  const hole = getHole(holeIndex);
+  const themeId = hole.theme ?? 'tropical';
+  const top = holePlaqueScores.slice(0, 5);
+  const contentKey = `${holeIndex}|${themeId}|${hole.name}|${hole.par}|${hole.lengthFeet}|${top.map((e) => `${e.rank}:${e.name}:${e.score}`).join(';')}`;
+  if (force || contentKey !== plaqueContentKey) {
+    plaqueContentKey = contentKey;
+    holePlaque.classList.remove(
+      'plaque-tropical', 'plaque-autumn', 'plaque-castle', 'plaque-neon', 'plaque-pirate',
+      'plaque-desert', 'plaque-space', 'plaque-volcano', 'plaque-candy', 'plaque-arctic',
+    );
+    holePlaque.classList.add(`plaque-${themeId}`);
+    if (!holePlaque.classList.contains('expanded') && !holePlaque.classList.contains('collapsed')) {
+      holePlaque.classList.add('collapsed');
+    }
+    plaqueHoleNum.textContent = `HOLE ${holeIndex + 1}`;
+    plaqueTitle.textContent = hole.name;
+    plaqueMeta.textContent = `Par ${hole.par}  ·  ${hole.lengthFeet} ft`;
+    plaqueToggle.title = `${hole.name} · Par ${hole.par}`;
+    plaqueToggle.setAttribute('aria-label', `Hole info: ${hole.name}`);
+    plaqueOrnament.dataset.theme = themeId;
+    plaqueOrnament.textContent = plaqueGlyph(themeId);
+
+    plaqueLb.replaceChildren();
+    if (top.length === 0) {
+      plaqueLb.append(el('li', { class: 'plaque-lb-empty', text: 'No scores yet — sink it!' }));
+    } else {
+      for (const e of top) {
+        const li = document.createElement('li');
+        const nm = e.name.length > 12 ? e.name.slice(0, 11) + '…' : e.name;
+        li.innerHTML = `<span class="rk">${e.rank}</span><span class="nm"></span><span class="sc">${e.score}</span>`;
+        li.querySelector('.nm')!.textContent = nm;
+        if (e.rank === 1) li.classList.add('best');
+        plaqueLb.append(li);
+      }
+    }
+  }
+  positionHolePlaque();
+}
+
+function plaqueGlyph(themeId: string): string {
+  switch (themeId) {
+    case 'tropical': return '🌴';
+    case 'autumn': return '🍁';
+    case 'castle': return '🏰';
+    case 'neon': return '◈';
+    case 'pirate': return '☠';
+    case 'desert': return '🌵';
+    case 'space': return '✦';
+    case 'volcano': return '🌋';
+    case 'candy': return '🍬';
+    case 'arctic': return '❄';
+    default: return '⛳';
+  }
+}
+
+function positionHolePlaque(): void {
+  // Prefer a pocket outside the green AABB; fall back to a corner overlay on the rim.
+  const hole = getHole(holeIndex);
+  const g = renderer.greenScreenRect(hole);
+  const wrap = canvasWrap.getBoundingClientRect();
+  const pw = holePlaque.offsetWidth || 160;
+  const ph = holePlaque.offsetHeight || 120;
+  const margin = 8;
+  const leftPocket = g.minX;
+  const rightPocket = wrap.width - g.maxX;
+  const bottomPocket = wrap.height - g.maxY;
+  const topPocket = g.minY;
+
+  let left = margin;
+  let top = margin;
+  let place = 'tl';
+
+  if (leftPocket >= pw + margin * 2) {
+    left = Math.max(margin, (leftPocket - pw) / 2);
+    top = Math.min(Math.max(margin, g.minY), Math.max(margin, wrap.height - ph - margin));
+    place = 'left';
+  } else if (rightPocket >= pw + margin * 2) {
+    left = wrap.width - rightPocket / 2 - pw / 2;
+    left = Math.min(left, wrap.width - pw - margin);
+    top = Math.min(Math.max(margin, g.minY), Math.max(margin, wrap.height - ph - margin));
+    place = 'right';
+  } else if (bottomPocket >= ph + margin * 2) {
+    left = Math.max(margin, Math.min((wrap.width - pw) / 2, wrap.width - pw - margin));
+    top = g.maxY + Math.max(margin, (bottomPocket - ph) / 2);
+    place = 'bottom';
+  } else if (topPocket >= ph + margin * 2) {
+    left = Math.max(margin, Math.min((wrap.width - pw) / 2, wrap.width - pw - margin));
+    top = Math.max(margin, (topPocket - ph) / 2);
+    place = 'top';
+  } else {
+    // Thin corner pocket — keep off the green center; sit on theme rim.
+    left = margin;
+    top = Math.max(margin, wrap.height - ph - margin);
+    place = 'corner';
+  }
+
+  holePlaque.style.left = `${Math.round(left)}px`;
+  holePlaque.style.top = `${Math.round(top)}px`;
+  holePlaque.dataset.place = place;
 }
 
 function updateHud(): void {
   const hole = getHole(holeIndex);
-  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · ${hole.name} · Par ${hole.par}`;
+  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par}`;
   holePill.title = hole.name;
   const me = localPlayer();
   const st = holeStrokes.get(localId) ?? 0;
   strokesPill.textContent = `Strokes ${st}`;
-  {
-    const w = hole.wind;
-    const mph = hole.windMph ?? 0;
-    const str = windStrengthFromMph(mph);
-    const slopeStr = slopeStrength(hole.slope ?? { x: 0, y: 0 });
-    const ang = Math.atan2(w.y, w.x);
-    const deg = (ang * 180) / Math.PI;
-    windPill.replaceChildren();
-    if (mph <= WIND_CALM_THRESHOLD) {
-      windPill.classList.add('calm');
-      windPill.classList.remove('gusty');
-      const calm = document.createElement('span');
-      calm.className = 'wind-calm-label';
-      calm.textContent = '0 mph';
-      windPill.append(calm);
-    } else {
-      windPill.classList.remove('calm');
-      windPill.classList.add('gusty');
-      const arrow = document.createElement('span');
-      arrow.className = 'wind-arrow';
-      arrow.setAttribute('aria-hidden', 'true');
-      arrow.style.transform = `rotate(${deg}deg)`;
-      arrow.textContent = '➤';
-      const meta = document.createElement('span');
-      meta.className = 'wind-meta';
-      meta.textContent = `${mph} mph`;
-      windPill.append(arrow, meta);
-    }
-    if (slopeStr >= 0.08 || showGreenMap) {
-      const br = document.createElement('span');
-      br.className = 'break-hint';
-      br.textContent = showGreenMap ? ' · Topo' : ' · Break';
-      windPill.append(br);
-    }
-    windPill.title =
-      mph <= WIND_CALM_THRESHOLD
-        ? `Calm (0 mph) · see large wind key on course`
-        : `Wind ${mph} mph (max ${WIND_MAX_MPH}) blowing toward ${deg.toFixed(0)}° · see wind key on course`;
-  }
+  updateHolePlaque();
   if (solo) {
     turnPill.textContent = phase === 'rolling' ? 'Ball rolling…' : phase === 'hole-done' ? 'Hole complete!' : 'Your turn';
   } else {
@@ -702,6 +794,7 @@ async function refreshHolePlaqueScores(): Promise<void> {
   // Ignore stale responses if the player advanced holes
   if (getHole(holeIndex).id !== holeNum) return;
   holePlaqueScores = entries;
+  updateHolePlaque();
 }
 
 function selectedPlayerColor(): string {
@@ -1316,7 +1409,7 @@ function tick(ts: number): void {
       : null;
 
   input.enabled = isMyTurn();
-  renderer.draw(hole, players, localId, aimPreview, turnPlayerId, showGreenMap, holePlaqueScores);
+  renderer.draw(hole, players, localId, aimPreview, turnPlayerId, showGreenMap);
   updateHud();
 }
 

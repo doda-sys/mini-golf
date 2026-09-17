@@ -18,11 +18,10 @@ const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
 
 /**
- * Thin world-space theme surround. Plaque / wind / theme headline live in
- * screen-space chrome so this pad no longer has to be huge (which used to
- * shrink the fairway).
+ * Tiny world-space rim around the green AABB so curb/theme trim stays visible.
+ * Camera fits the green tightly — plaque is an HTML overlay, not canvas chrome.
  */
-export const THEME_PAD = 56;
+export const THEME_PAD = 24;
 
 export type AimPreview = {
   from: Vec2;
@@ -38,9 +37,12 @@ export class Renderer {
   viewW = 0;
   viewH = 0;
   scale = 1;
-  /** CSS-pixel origin of world (0,0) on the canvas (before pad). */
+  /** CSS-pixel origin of the fitted content (camMin) on the canvas. */
   worldOx = 0;
   worldOy = 0;
+  /** World-space top-left of the fitted content (green AABB − rim). */
+  camMinX = 0;
+  camMinY = 0;
   offsetX = 0;
   offsetY = 0;
   pad = THEME_PAD;
@@ -52,6 +54,17 @@ export class Renderer {
     this.ctx = ctx;
   }
 
+  private applyWorldTransform(): void {
+    this.ctx.setTransform(
+      this.dpr * this.scale,
+      0,
+      0,
+      this.dpr * this.scale,
+      this.dpr * (this.worldOx - this.camMinX * this.scale),
+      this.dpr * (this.worldOy - this.camMinY * this.scale),
+    );
+  }
+
   resize(hole: HoleDef): void {
     const parent = this.canvas.parentElement ?? document.body;
     const maxW = Math.max(1, parent.clientWidth || window.innerWidth);
@@ -59,7 +72,7 @@ export class Renderer {
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.pad = THEME_PAD;
 
-    // Canvas fills the wrap — no empty letterbox around a tiny board.
+    // Canvas fills the wrap — fairway is fitted to dominate the viewport.
     this.viewW = maxW;
     this.viewH = maxH;
     this.canvas.style.width = `${maxW}px`;
@@ -67,114 +80,41 @@ export class Renderer {
     this.canvas.width = Math.floor(maxW * this.dpr);
     this.canvas.height = Math.floor(maxH * this.dpr);
 
-    const totalW = hole.width + this.pad * 2;
-    const totalH = hole.height + this.pad * 2;
-    const gb = polyBounds(hole.green);
+    const greenPoly = hole.green?.length >= 3 ? hole.green : rectPoly(0, 0, hole.width, hole.height);
+    const gb = polyBounds(greenPoly);
+    const greenW = Math.max(48, gb.maxX - gb.minX);
+    const greenH = Math.max(48, gb.maxY - gb.minY);
 
-    // Compact chrome targets — readable, but fairway stays the star.
-    const HEADLINE_H = Math.round(Math.min(44, Math.max(34, maxH * 0.055)));
-    const PLAQUE_W = Math.round(Math.min(188, Math.max(152, maxW * 0.28)));
-    const PLAQUE_H = Math.round(Math.min(168, Math.max(132, maxH * 0.22)));
-    const WIND_S = Math.round(Math.min(96, Math.max(78, Math.min(maxW, maxH) * 0.12)));
-    const GAP = 8;
+    // Fit the green AABB itself to the viewport (tiny CSS inset only). Theme rim may
+    // sit partially off-screen — fairway dominates; plaque is HTML outside the green.
+    const inset = 4;
+    const playW = Math.max(64, maxW - inset * 2);
+    const playH = Math.max(64, maxH - inset * 2);
+    const fit = Math.min(playW / greenW, playH / greenH);
+    const worldViewW = greenW * fit;
+    const worldViewH = greenH * fit;
+    const ox = (maxW - worldViewW) / 2;
+    const oy = (maxH - worldViewH) / 2;
 
-    type Margins = { top: number; bottom: number; left: number; right: number };
-    // Prefer maximizing the green; only reserve side/bottom chrome when
-    // natural pockets cannot host the compact plaque + wind off-green.
-    const candidates: Margins[] = [
-      { top: HEADLINE_H, bottom: 0, left: 0, right: 0 },
-      { top: HEADLINE_H, bottom: PLAQUE_H + GAP, left: 0, right: 0 },
-      { top: HEADLINE_H, bottom: 0, left: PLAQUE_W + GAP, right: 0 },
-      { top: HEADLINE_H, bottom: 0, left: 0, right: PLAQUE_W + GAP },
-      { top: HEADLINE_H, bottom: 0, left: PLAQUE_W + GAP, right: WIND_S + GAP },
-      { top: HEADLINE_H, bottom: 0, left: WIND_S + GAP, right: PLAQUE_W + GAP },
-    ];
+    this.scale = fit;
+    // Camera origin = green top-left (no world rim reserved in the fit).
+    this.camMinX = gb.minX;
+    this.camMinY = gb.minY;
+    this.worldOx = ox;
+    this.worldOy = oy;
+    this.offsetX = ox;
+    this.offsetY = oy;
+    // Keep a draw pad for surround/trim, but it no longer shrinks the fairway.
+    this.pad = THEME_PAD;
 
-    let bestFit = -1;
-    let bestOx = 0;
-    let bestOy = 0;
-    let bestScale = 1;
-
-    for (const m of candidates) {
-      const playW = Math.max(80, maxW - m.left - m.right);
-      const playH = Math.max(80, maxH - m.top - m.bottom);
-      const fit = Math.min(playW / totalW, playH / totalH);
-      const worldViewW = totalW * fit;
-      const worldViewH = totalH * fit;
-      const ox = m.left + (playW - worldViewW) / 2;
-      const oy = m.top + (playH - worldViewH) / 2;
-      const green: ScreenRect = {
-        minX: ox + (gb.minX + this.pad) * fit,
-        minY: oy + (gb.minY + this.pad) * fit,
-        maxX: ox + (gb.maxX + this.pad) * fit,
-        maxY: oy + (gb.maxY + this.pad) * fit,
-      };
-
-      // Headline must sit fully above the green AABB.
-      if (green.minY < m.top - 1) continue;
-
-      const plaque = placeChromeBox(maxW, maxH, green, PLAQUE_W, PLAQUE_H, [], [
-        'left',
-        'right',
-        'bottom',
-        'top-left',
-        'top-right',
-      ]);
-      if (!plaque) continue;
-      const wind = placeChromeBox(
-        maxW,
-        maxH,
-        green,
-        WIND_S,
-        WIND_S + 8,
-        [boxRect(plaque.x, plaque.y, plaque.w, plaque.h)],
-        ['right', 'left', 'top-right', 'top', 'bottom', 'bottom-right'],
-      );
-      if (!wind) continue;
-
-      if (fit > bestFit) {
-        bestFit = fit;
-        bestOx = ox;
-        bestOy = oy;
-        bestScale = fit;
-      }
-      // candidates are ordered least→most chrome; first max fit wins, but we
-      // keep scanning in case a later layout somehow fits larger (shouldn't).
-    }
-
-    if (bestFit < 0) {
-      // Fallback: slim top + bottom chrome so UI always has a home.
-      const m = { top: HEADLINE_H, bottom: Math.min(PLAQUE_H + GAP, maxH * 0.28), left: 0, right: 0 };
-      const playW = Math.max(80, maxW - m.left - m.right);
-      const playH = Math.max(80, maxH - m.top - m.bottom);
-      bestScale = Math.min(playW / totalW, playH / totalH);
-      const worldViewW = totalW * bestScale;
-      const worldViewH = totalH * bestScale;
-      bestOx = m.left + (playW - worldViewW) / 2;
-      bestOy = m.top + (playH - worldViewH) / 2;
-    }
-
-    this.scale = bestScale;
-    this.worldOx = bestOx;
-    this.worldOy = bestOy;
-    this.offsetX = this.worldOx;
-    this.offsetY = this.worldOy;
-
-    this.ctx.setTransform(
-      this.dpr * bestScale,
-      0,
-      0,
-      this.dpr * bestScale,
-      this.dpr * (this.worldOx + bestScale * this.pad),
-      this.dpr * (this.worldOy + bestScale * this.pad),
-    );
+    this.applyWorldTransform();
   }
 
   screenToWorld(clientX: number, clientY: number): Vec2 {
     const rect = this.canvas.getBoundingClientRect();
     return {
-      x: (clientX - rect.left - this.worldOx) / this.scale - this.pad,
-      y: (clientY - rect.top - this.worldOy) / this.scale - this.pad,
+      x: (clientX - rect.left - this.worldOx) / this.scale + this.camMinX,
+      y: (clientY - rect.top - this.worldOy) / this.scale + this.camMinY,
     };
   }
 
@@ -191,9 +131,18 @@ export class Renderer {
   /** Project a world point to CSS canvas pixels. */
   worldToScreen(wx: number, wy: number): Vec2 {
     return {
-      x: this.worldOx + (wx + this.pad) * this.scale,
-      y: this.worldOy + (wy + this.pad) * this.scale,
+      x: this.worldOx + (wx - this.camMinX) * this.scale,
+      y: this.worldOy + (wy - this.camMinY) * this.scale,
     };
+  }
+
+  /** CSS-pixel screen rect of the playable green AABB (for HTML plaque placement). */
+  greenScreenRect(hole: HoleDef): { minX: number; minY: number; maxX: number; maxY: number } {
+    const greenPoly = hole.green?.length >= 3 ? hole.green : rectPoly(0, 0, hole.width, hole.height);
+    const gb = polyBounds(greenPoly);
+    const g0 = this.worldToScreen(gb.minX, gb.minY);
+    const g1 = this.worldToScreen(gb.maxX, gb.maxY);
+    return { minX: g0.x, minY: g0.y, maxX: g1.x, maxY: g1.y };
   }
 
   draw(
@@ -203,7 +152,6 @@ export class Renderer {
     aim: AimPreview,
     highlightId: string | null,
     showGreenMap = false,
-    holeScores: LeaderboardEntry[] = [],
   ): void {
     const ctx = this.ctx;
     const theme = THEMES[hole.theme] ?? THEMES.tropical;
@@ -219,18 +167,15 @@ export class Renderer {
     ctx.fillRect(0, 0, this.viewW, this.viewH);
     this.endScreenSpace();
 
-    // Restore world transform (beginScreenSpace only saved/restored ctx state;
-    // resize() setTransform is still active after endScreenSpace).
-    ctx.setTransform(
-      this.dpr * this.scale,
-      0,
-      0,
-      this.dpr * this.scale,
-      this.dpr * (this.worldOx + this.scale * this.pad),
-      this.dpr * (this.worldOy + this.scale * this.pad),
-    );
+    this.applyWorldTransform();
 
-    ctx.clearRect(-pad, -pad, hole.width + pad * 2, hole.height + pad * 2);
+    const gb = polyBounds(green);
+    ctx.clearRect(
+      this.camMinX - 4,
+      this.camMinY - 4,
+      gb.maxX - this.camMinX + pad + 8,
+      gb.maxY - this.camMinY + pad + 8,
+    );
 
     // Themed surroundings fill everything; green is clipped on top
     drawThemeSurround(ctx, hole, theme, pad, green);
@@ -349,41 +294,8 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Screen-space chrome: compact headline, wind meter, plaque — never on the green.
-    // Sized in CSS pixels so they stay readable while the fairway dominates.
-    this.beginScreenSpace();
-    const gb = polyBounds(green);
-    const g0 = this.worldToScreen(gb.minX, gb.minY);
-    const g1 = this.worldToScreen(gb.maxX, gb.maxY);
-    const greenScreen = { minX: g0.x, minY: g0.y, maxX: g1.x, maxY: g1.y };
-    drawThemeHeadline(ctx, hole, theme, this.viewW, this.viewH, greenScreen);
-    const plaqueRect = drawHolePlaqueScreen(
-      ctx,
-      hole,
-      this.viewW,
-      this.viewH,
-      greenScreen,
-      holeScores,
-    );
-    drawWindKeyScreen(
-      ctx,
-      hole,
-      this.viewW,
-      this.viewH,
-      greenScreen,
-      plaqueRect ? [plaqueRect] : [],
-    );
-    this.endScreenSpace();
-
-    // Re-arm world transform for any late callers / next frame consistency.
-    ctx.setTransform(
-      this.dpr * this.scale,
-      0,
-      0,
-      this.dpr * this.scale,
-      this.dpr * (this.worldOx + this.scale * this.pad),
-      this.dpr * (this.worldOy + this.scale * this.pad),
-    );
+    // Plaque / hole name / wind UI live in HTML overlay — canvas stays fairway-first.
+    this.applyWorldTransform();
   }
 }
 

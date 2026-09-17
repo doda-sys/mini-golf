@@ -26,9 +26,9 @@ Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent
 2. **Release** to putt. Friction slows the ball; sink it in the cup when you’re slow enough over the hole.
 3. Avoid **walls**, bounce off **bumpers**, slog through **sand**, slide on **ice**, and don’t splash in **water/lava** (resets to tee +1).
 4. Hit **ramps** with enough speed/aim to jump gaps — failed landings splash or reset fairly.
-5. Watch the on-course **WIND** key (compass + **0–25 mph**) — secondary to green break.
+5. Wind still affects putts subtly when present (no on-screen wind meter).
 6. Toggle **Green Map / Topo** for StrackaLine-style contours, downhill ticks, and elevation heatmap (**same height field as physics**).
-7. Read the **hole plaque** (outside the green): number, name, par, length, plus a **worldwide per-hole leaderboard** (best strokes on that hole).
+7. Read the **themed hole plaque** (corner overlay outside the green): number, full name, par, length, plus **WORLD BEST** per-hole scores.
 8. Pick your **ball color** on the start menu (White / Highlighter yellow / Pink / Galactic) — saved for next time.
 9. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
 10. The **start menu** shows a live **top-scores preview** from the worldwide board; open **Full leaderboard** for everyone. Ties: first recorded score at that stroke total ranks higher (client sorts by strokes, then timestamp when the Scores API provides one).
