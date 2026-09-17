@@ -63,10 +63,17 @@ export type HoleDef = {
   /** Grass fill style (deterministic from hole id). */
   grass: GrassPattern;
   /**
-   * Per-hole wind acceleration (world units / second²-ish, applied while moving).
+   * Per-hole wind vector (direction + strength ~0–1.2). Physics applies a
+   * speed-scaled lateral/crosswind drift while the ball is moving.
    * Deterministic from hole id so multiplayer stays in sync without net messages.
    */
   wind: Vec2;
+  /**
+   * Optional green break / slope: downhill direction with magnitude ~0–1.1.
+   * Constant gravity-like acceleration while on the green. Flat holes use {0,0}.
+   * Deterministic from hole id (separate seed) for multiplayer sync.
+   */
+  slope: Vec2;
 };
 
 export type PlayerInfo = {

@@ -276,17 +276,41 @@ function makeGrass(id: number, rng: () => number): GrassPattern {
 }
 
 function makeWind(rng: () => number): Vec2 {
-  // Strength 0 (calm) to ~1.2; direction anywhere. Many holes stay calm.
+  // ~30% calm; remaining light / moderate / gusty. Direction anywhere.
   const calm = rng();
-  if (calm < 0.22) return { x: 0, y: 0 };
+  if (calm < 0.3) return { x: 0, y: 0 };
   const ang = rng() * Math.PI * 2;
-  const mag = 0.25 + rng() * 0.95;
+  const tier = rng();
+  const mag =
+    tier < 0.4
+      ? 0.22 + rng() * 0.28 // light
+      : tier < 0.78
+        ? 0.5 + rng() * 0.35 // moderate
+        : 0.9 + rng() * 0.35; // gusty
+  return { x: Math.cos(ang) * mag, y: Math.sin(ang) * mag };
+}
+
+/**
+ * Break / slope from a separate id seed so layout RNG stays independent.
+ * ~58% flat; others gentle→noticeable downhill.
+ */
+function makeSlope(id: number): Vec2 {
+  const rng = mulberry32(((id * 374761393) ^ 0x91e10da5) >>> 0);
+  if (rng() < 0.58) return { x: 0, y: 0 };
+  const ang = rng() * Math.PI * 2;
+  const tier = rng();
+  const mag =
+    tier < 0.45
+      ? 0.18 + rng() * 0.28 // gentle
+      : tier < 0.82
+        ? 0.45 + rng() * 0.35 // readable break
+        : 0.8 + rng() * 0.3; // steep
   return { x: Math.cos(ang) * mag, y: Math.sin(ang) * mag };
 }
 
 /**
  * Procedurally generate one distinct hole from its catalog id (1..POOL_SIZE).
- * Layout, size, par, hazards, green shape, grass, wind, and theme are derived from the id seed.
+ * Layout, size, par, hazards, green shape, grass, wind, slope, and theme are derived from the id seed.
  */
 export function generateHole(id: number): HoleDef {
   const rng = mulberry32(id * 2654435761 + 0x9e3779b9);
@@ -298,6 +322,7 @@ export function generateHole(id: number): HoleDef {
   const green = makeGreen(rng, width, height);
   const grass = makeGrass(id, rng);
   const wind = makeWind(rng);
+  const slope = makeSlope(id);
 
   // Tee near "bottom" of green, cup near "top"
   let minY = Infinity;
@@ -446,6 +471,7 @@ export function generateHole(id: number): HoleDef {
     theme: themeId,
     grass,
     wind: { x: Math.round(wind.x * 1000) / 1000, y: Math.round(wind.y * 1000) / 1000 },
+    slope: { x: Math.round(slope.x * 1000) / 1000, y: Math.round(slope.y * 1000) / 1000 },
   };
 }
 
@@ -469,3 +495,11 @@ export function pickCourseIds(seed: number, count = ROUND_HOLES, poolSize = POOL
 export function windStrength(wind: Vec2): number {
   return Math.min(1, Math.hypot(wind.x, wind.y) / 1.2);
 }
+
+/** Slope / break strength 0–1 for HUD (from stored vector). */
+export function slopeStrength(slope: Vec2): number {
+  return Math.min(1, Math.hypot(slope.x, slope.y) / 1.1);
+}
+
+/** Calm threshold — below this, treat wind as inactive for HUD/indicators. */
+export const WIND_CALM_THRESHOLD = 0.08;

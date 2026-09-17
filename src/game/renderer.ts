@@ -94,6 +94,7 @@ export class Renderer {
     pathPoly(ctx, green);
     ctx.clip();
     drawGrass(ctx, hole, green);
+    drawSlopeCues(ctx, hole, green);
     // Soft inner shadow along green
     ctx.strokeStyle = 'rgba(0,0,0,0.22)';
     ctx.lineWidth = 8;
@@ -103,6 +104,9 @@ export class Renderer {
 
     // Green curb / bevel rim
     drawGreenRim(ctx, green, theme);
+
+    // Subtle wind compass on/near the green when windy
+    drawWindIndicator(ctx, hole, green);
 
     // Zones (hazards) — clipped to green visually via draw order
     ctx.save();
@@ -305,6 +309,176 @@ function hash2(seed: number, x: number, y: number): number {
   let n = (seed ^ Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263)) >>> 0;
   n = Math.imul(n ^ (n >>> 13), 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+
+function polyBounds(green: Vec2[]): { minX: number; minY: number; maxX: number; maxY: number; cx: number; cy: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of green) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+}
+
+function pointInPolyLocal(px: number, py: number, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Contour lines, downhill chevrons, and tint so break is readable before putting. */
+function drawSlopeCues(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
+  const s = hole.slope;
+  if (!s || (s.x === 0 && s.y === 0)) return;
+  const mag = Math.hypot(s.x, s.y);
+  if (mag < 0.08) return;
+
+  const { minX, minY, maxX, maxY, cx, cy } = polyBounds(green);
+  const dx = s.x / mag;
+  const dy = s.y / mag;
+  // Contour direction (perpendicular to downhill)
+  const px = -dy;
+  const py = dx;
+  const span = Math.hypot(maxX - minX, maxY - minY) + 40;
+  const strength = Math.min(1, mag / 1.1);
+
+  // Gradient tint: lighter uphill, darker downhill
+  ctx.save();
+  const gx0 = cx - dx * span * 0.35;
+  const gy0 = cy - dy * span * 0.35;
+  const gx1 = cx + dx * span * 0.35;
+  const gy1 = cy + dy * span * 0.35;
+  const tint = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+  tint.addColorStop(0, `rgba(255,255,220,${0.08 + strength * 0.1})`);
+  tint.addColorStop(0.45, 'rgba(0,0,0,0)');
+  tint.addColorStop(1, `rgba(0,40,20,${0.12 + strength * 0.18})`);
+  ctx.fillStyle = tint;
+  ctx.fillRect(minX - 4, minY - 4, maxX - minX + 8, maxY - minY + 8);
+
+  // Contour lines (level curves)
+  const spacing = 28 + (1 - strength) * 18;
+  ctx.strokeStyle = `rgba(255,255,255,${0.12 + strength * 0.18})`;
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([5, 7]);
+  for (let i = -8; i <= 8; i++) {
+    if (i === 0) continue;
+    const ox = cx + dx * i * spacing;
+    const oy = cy + dy * i * spacing;
+    ctx.beginPath();
+    ctx.moveTo(ox - px * span, oy - py * span);
+    ctx.lineTo(ox + px * span, oy + py * span);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Downhill hatching near the low side
+  ctx.strokeStyle = `rgba(0,0,0,${0.1 + strength * 0.14})`;
+  ctx.lineWidth = 1;
+  const hatchOriginX = cx + dx * span * 0.22;
+  const hatchOriginY = cy + dy * span * 0.22;
+  for (let i = -6; i <= 6; i++) {
+    const hx = hatchOriginX + px * i * 16;
+    const hy = hatchOriginY + py * i * 16;
+    ctx.beginPath();
+    ctx.moveTo(hx - dx * 10, hy - dy * 10);
+    ctx.lineTo(hx + dx * 14, hy + dy * 14);
+    ctx.stroke();
+  }
+
+  // Chevron arrows pointing downhill across the green
+  const arrowCount = 3 + Math.floor(strength * 2);
+  ctx.fillStyle = `rgba(255, 230, 140, ${0.35 + strength * 0.35})`;
+  ctx.strokeStyle = `rgba(40, 30, 0, ${0.35 + strength * 0.25})`;
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < arrowCount; i++) {
+    const t = (i + 1) / (arrowCount + 1);
+    const along = (t - 0.5) * span * 0.55;
+    const ax = cx + px * along * 0.35 - dx * span * 0.05;
+    const ay = cy + py * along * 0.35 - dy * span * 0.05;
+    // stagger a second column
+    const candidates = [
+      { x: ax, y: ay },
+      { x: ax + dx * spacing * 1.2, y: ay + dy * spacing * 1.2 },
+    ];
+    for (const c of candidates) {
+      if (!pointInPolyLocal(c.x, c.y, green)) continue;
+      const size = 7 + strength * 5;
+      drawChevron(ctx, c.x, c.y, dx, dy, size);
+    }
+  }
+  ctx.restore();
+}
+
+function drawChevron(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+  size: number,
+): void {
+  const px = -dy;
+  const py = dx;
+  ctx.beginPath();
+  ctx.moveTo(x - dx * size * 0.2 + px * size * 0.7, y - dy * size * 0.2 + py * size * 0.7);
+  ctx.lineTo(x + dx * size * 0.85, y + dy * size * 0.85);
+  ctx.lineTo(x - dx * size * 0.2 - px * size * 0.7, y - dy * size * 0.2 - py * size * 0.7);
+  ctx.stroke();
+}
+
+/** Compact wind arrow near the green when wind is active. */
+function drawWindIndicator(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
+  const w = hole.wind;
+  if (!w) return;
+  const mag = Math.hypot(w.x, w.y);
+  if (mag < 0.08) return;
+
+  const { minX, minY, maxX, cx } = polyBounds(green);
+  const x = Math.min(maxX - 28, Math.max(minX + 28, cx));
+  const y = minY - 22;
+  const ang = Math.atan2(w.y, w.x);
+  const strength = Math.min(1, mag / 1.2);
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,20,40,0.45)';
+  roundRect(ctx, x - 26, y - 16, 52, 28, 8);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(140,200,255,${0.45 + strength * 0.4})`;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x - 26, y - 16, 52, 28, 8);
+  ctx.stroke();
+
+  ctx.translate(x, y);
+  ctx.rotate(ang);
+  ctx.fillStyle = `rgba(180,230,255,${0.75 + strength * 0.25})`;
+  ctx.strokeStyle = 'rgba(20,60,90,0.7)';
+  ctx.lineWidth = 1.25;
+  // Arrow body
+  ctx.beginPath();
+  ctx.moveTo(-14, 0);
+  ctx.lineTo(6, 0);
+  ctx.stroke();
+  // Chevron head
+  ctx.beginPath();
+  ctx.moveTo(2, -7);
+  ctx.lineTo(14, 0);
+  ctx.lineTo(2, 7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGreenRim(ctx: CanvasRenderingContext2D, green: Vec2[], theme: HoleTheme): void {

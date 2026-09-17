@@ -14,10 +14,16 @@ export const CUP_DAMP = 0.82;
 /** Max fraction of cup radius for "deep" residence capture. */
 export const CUP_DEEP_FRAC = 0.9;
 /**
- * Wind acceleration scale. hole.wind is roughly 0–1.2 magnitude;
- * applied as gentle accel only while the ball is moving.
+ * Crosswind (lateral) scale — dominant: curves the path perpendicular to travel.
+ * hole.wind magnitude is roughly 0–1.2.
  */
-export const WIND_ACCEL = 0.018;
+export const WIND_CROSS = 0.052;
+/** Weaker along-track wind (head/tail) so drift feels lateral, not rocket boost. */
+export const WIND_ALONG = 0.014;
+/** Speed (px/frame-ish) at which wind reaches full strength. Weaker near stop. */
+export const WIND_SPEED_REF = 7.5;
+/** Constant downhill acceleration scale for hole.slope (~0–1.1 mag). */
+export const SLOPE_ACCEL = 0.032;
 
 export type BallState = {
   pos: Vec2;
@@ -286,10 +292,35 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
   for (let i = 0; i < steps; i++) {
     if (ball.sunk) return;
 
-    // Wind only while moving (so aiming stays fair)
+    // Slope / break: constant gravity-like accel down the green (always on).
+    const slope = hole.slope;
+    if (slope && (slope.x !== 0 || slope.y !== 0)) {
+      ball.vel = add(ball.vel, scale(slope, SLOPE_ACCEL * h * 60));
+    }
+
+    // Lateral/crosswind drift while moving — stronger at higher speeds, fades near stop.
     const speedBefore = len(ball.vel);
-    if (speedBefore > MIN_SPEED && (hole.wind.x !== 0 || hole.wind.y !== 0)) {
-      ball.vel = add(ball.vel, scale(hole.wind, WIND_ACCEL * h * 60));
+    const wind = hole.wind;
+    if (
+      speedBefore > MIN_SPEED &&
+      wind &&
+      (wind.x !== 0 || wind.y !== 0)
+    ) {
+      const invSp = 1 / speedBefore;
+      const tx = ball.vel.x * invSp;
+      const ty = ball.vel.y * invSp;
+      // Perpendicular (left normal)
+      const nx = -ty;
+      const ny = tx;
+      const windLat = wind.x * nx + wind.y * ny;
+      const windAlong = wind.x * tx + wind.y * ty;
+      // Smooth speed factor: ~0 near MIN_SPEED, ~1 at WIND_SPEED_REF+
+      const sf = Math.min(1, Math.max(0, (speedBefore - MIN_SPEED) / (WIND_SPEED_REF - MIN_SPEED)));
+      const windScale = h * 60 * sf;
+      ball.vel = {
+        x: ball.vel.x + (nx * windLat * WIND_CROSS + tx * windAlong * WIND_ALONG) * windScale,
+        y: ball.vel.y + (ny * windLat * WIND_CROSS + ty * windAlong * WIND_ALONG) * windScale,
+      };
     }
 
     ball.pos = add(ball.pos, scale(ball.vel, h * 60));

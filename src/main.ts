@@ -1,6 +1,6 @@
 import './style.css';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, POOL_SIZE, ROUND_HOLES } from './levels/holes';
-import { windStrength } from './levels/generate';
+import { slopeStrength, windStrength, WIND_CALM_THRESHOLD } from './levels/generate';
 import { Renderer } from './game/renderer';
 import { InputController } from './game/input';
 import {
@@ -237,17 +237,48 @@ function updateHud(): void {
   {
     const w = hole.wind;
     const str = windStrength(w);
-    if (str < 0.05) {
-      windPill.textContent = 'Wind calm';
-      windPill.title = 'No wind on this hole';
+    const slopeStr = slopeStrength(hole.slope ?? { x: 0, y: 0 });
+    if (str < WIND_CALM_THRESHOLD) {
+      windPill.classList.add('calm');
+      windPill.classList.remove('gusty');
+      windPill.replaceChildren();
+      const calm = document.createElement('span');
+      calm.className = 'wind-calm-label';
+      calm.textContent = 'Calm';
+      windPill.append(calm);
+      if (slopeStr >= 0.08) {
+        const br = document.createElement('span');
+        br.className = 'break-hint';
+        br.textContent = ' · Break';
+        br.title = 'This green has visible break — watch the chevrons';
+        windPill.append(br);
+      }
+      windPill.title = slopeStr >= 0.08
+        ? 'No wind · green has break (see slope marks)'
+        : 'No wind on this hole';
     } else {
+      windPill.classList.remove('calm');
+      windPill.classList.add('gusty');
       const ang = Math.atan2(w.y, w.x);
-      const deg = ((ang * 180) / Math.PI + 360) % 360;
-      const dirs = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'];
-      const arrow = dirs[Math.round(deg / 45) % 8];
+      const deg = (ang * 180) / Math.PI; // CSS rotate: 0 = right
       const label = str < 0.35 ? 'light' : str < 0.7 ? 'moderate' : 'strong';
-      windPill.textContent = `Wind ${arrow} ${label}`;
-      windPill.title = `Wind ${w.x.toFixed(2)}, ${w.y.toFixed(2)} (deterministic for this hole)`;
+      windPill.replaceChildren();
+      const arrow = document.createElement('span');
+      arrow.className = 'wind-arrow';
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.style.transform = `rotate(${deg}deg)`;
+      arrow.textContent = '➤';
+      const meta = document.createElement('span');
+      meta.className = 'wind-meta';
+      meta.textContent = label;
+      windPill.append(arrow, meta);
+      if (slopeStr >= 0.08) {
+        const br = document.createElement('span');
+        br.className = 'break-hint';
+        br.textContent = ' · Break';
+        windPill.append(br);
+      }
+      windPill.title = `Wind ${label} toward ${deg.toFixed(0)}° · crosswind drift scales with speed`;
     }
   }
   if (solo) {

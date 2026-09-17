@@ -204,6 +204,55 @@ label {
   border: 1px solid rgba(140, 200, 255, 0.45);
   color: #cfefff;
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 8px;
+}
+
+.hud-pill.wind.calm {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+}
+
+.hud-pill.wind .wind-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 50%;
+  background: rgba(40, 100, 160, 0.55);
+  border: 1px solid rgba(180, 230, 255, 0.65);
+  font-size: 1.05rem;
+  line-height: 1;
+  color: #e8f7ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  transform-origin: center center;
+  flex-shrink: 0;
+}
+
+.hud-pill.wind.gusty .wind-arrow {
+  box-shadow: 0 0 10px rgba(120, 200, 255, 0.45);
+}
+
+.hud-pill.wind .wind-meta {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.hud-pill.wind .wind-calm-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.hud-pill.wind .break-hint {
+  color: #ffe08a;
+  font-weight: 700;
+  font-size: 0.78rem;
 }
 
 .hud-pill.room {

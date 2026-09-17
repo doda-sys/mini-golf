@@ -9,7 +9,8 @@ Each round deals **9 holes from a pool of 1,000** procedurally generated courses
 1. **Aim:** Click/touch near your ball and **drag away** (pull-back aiming). The dashed line shows putt direction; the arc shows power.
 2. **Release** to putt. Friction slows the ball; sink it in the cup when you’re slow enough over the hole.
 3. Avoid **walls**, bounce off **pink bumpers**, slog through **sand**, slide on **ice**, and don’t splash in **water** (resets to tee).
-4. Clear all **9 holes**, check the **scorecard**, then next hole.
+4. Watch the **wind** HUD arrow (and on-green compass) — crosswind drifts the ball more on longer/faster putts. Some greens show **break** (contour lines + downhill chevrons).
+5. Clear all **9 holes**, check the **scorecard**, then next hole.
 
 ### Solo
 
@@ -65,8 +66,8 @@ You can also drop `dist/` onto any static host (Netlify, Cloudflare Pages, S3, n
 
 | Piece | Role |
 |--------|------|
-| `src/physics/world.ts` | Circle vs AABB walls, bumper bounce, friction, sand/ice/water, cup sink |
-| `src/levels/generate.ts` | Procedural 1000-hole catalog + course deal |
+| `src/physics/world.ts` | Walls, bumpers, friction, hazards, cup sink, lateral wind, slope break |
+| `src/levels/generate.ts` | Procedural 1000-hole catalog, wind/slope seeds, course deal |
 | `src/levels/themes.ts` | Themed surrounds outside each green |
 | `src/levels/holes.ts` | Active 9-hole course from the pool |
 | `src/game/renderer.ts` | Canvas drawing + theme frames |
