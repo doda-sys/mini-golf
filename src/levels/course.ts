@@ -279,7 +279,7 @@ function hole1(): HoleDef {
   ];
   return finish({
     id: 1,
-    name: 'Froops Fairway',
+    name: 'Palm Froops Paradise',
     par: 3,
     width: W,
     height: H,
@@ -321,7 +321,7 @@ function hole2(): HoleDef {
   const zones = [zone(stemX + hw + 55, cornerY + 12, 58, 50, 'sand')];
   return finish({
     id: 2,
-    name: 'Dogleg Delight',
+    name: 'Crimson Leaf Dogleg',
     par: 4,
     width: W,
     height: H,
@@ -377,7 +377,7 @@ function hole3(): HoleDef {
   ];
   return finish({
     id: 3,
-    name: 'Windmill Whirl',
+    name: 'Dutch Devil Windmill',
     par: 4,
     width: W,
     height: H,
@@ -421,7 +421,7 @@ function hole4(): HoleDef {
   ];
   return finish({
     id: 4,
-    name: "Banker's Alley",
+    name: 'Neon Banker\'s Blitz',
     par: 3,
     width: W,
     height: H,
@@ -466,7 +466,7 @@ function hole5(): HoleDef {
   ];
   return finish({
     id: 5,
-    name: "Pirate's Moat",
+    name: 'Blackbeard\'s Moat',
     par: 4,
     width: W,
     height: H,
@@ -527,7 +527,7 @@ function hole6(): HoleDef {
   ];
   return finish({
     id: 6,
-    name: 'Canyon Leap',
+    name: 'Mirage Canyon Leap',
     par: 5,
     width: W,
     height: H,
@@ -587,7 +587,7 @@ function hole7(): HoleDef {
   };
   return finish({
     id: 7,
-    name: 'Skybridge Ramp',
+    name: 'Orbital Skybridge',
     par: 4,
     width: W,
     height: H,
@@ -635,7 +635,7 @@ function hole8(): HoleDef {
   ];
   return finish({
     id: 8,
-    name: 'Volcano Vista',
+    name: 'Mount Magma Mayhem',
     par: 4,
     width: W,
     height: H,
@@ -705,7 +705,7 @@ function hole9(): HoleDef {
   const zones = [zone(stemX + hw * 0.5, (teeY + cornerY) / 2, 72, 100, 'sand')];
   return finish({
     id: 9,
-    name: 'Fooze Finale',
+    name: 'Sugar-Rush Fooze Finale',
     par: 5,
     width: W,
     height: H,

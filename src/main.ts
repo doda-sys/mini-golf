@@ -732,7 +732,10 @@ function openScorecard(final: boolean): void {
   const table = el('table', { class: 'score-table' });
   const head = el('tr');
   head.append(el('th', { text: 'Player' }));
-  for (let i = 0; i <= holeIndex; i++) head.append(el('th', { text: String(i + 1) }));
+  for (let i = 0; i <= holeIndex; i++) {
+    const hn = HOLES[i]?.name ?? `Hole ${i + 1}`;
+    head.append(el('th', { text: String(i + 1), title: hn }));
+  }
   head.append(el('th', { text: 'Tot' }));
   head.append(el('th', { text: '+/−', title: 'Score relative to par' }));
   table.append(head);

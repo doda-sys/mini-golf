@@ -8,15 +8,15 @@ Each round plays a fixed **championship course of 9 curated holes** (2× Par 3 �
 
 | # | Name | Par | Highlights |
 |---|------|-----|------------|
-| 1 | Froops Fairway | 3 | Clean opener, gated — not a free HIO |
-| 2 | Dogleg Delight | 4 | Risk/reward dogleg **shortcut** |
-| 3 | Windmill Whirl | 4 | Rotating **windmill** gate |
-| 4 | Banker's Alley | 3 | Short, narrow bank shot |
-| 5 | Pirate's Moat | 4 | **Water** hazard / bridge |
-| 6 | Canyon Leap | 5 | Long route + **ramp jump shortcut** over **water** |
-| 7 | Skybridge Ramp | 4 | **Ramp/jump** over sand |
-| 8 | Volcano Vista | 4 | **Volcano** + lava hazard |
-| 9 | Fooze Finale | 5 | Spectacle finale + **shortcut** ramp + windmill |
+| 1 | Palm Froops Paradise | 3 | Tropical opener, gated — not a free HIO |
+| 2 | Crimson Leaf Dogleg | 4 | Autumn risk/reward dogleg **shortcut** |
+| 3 | Dutch Devil Windmill | 4 | Castle **windmill** gate |
+| 4 | Neon Banker's Blitz | 3 | Neon arcade narrow bank shot |
+| 5 | Blackbeard's Moat | 4 | Pirate **water** hazard / bridge |
+| 6 | Mirage Canyon Leap | 5 | Desert long route + **ramp jump shortcut** over **water** |
+| 7 | Orbital Skybridge | 4 | Space **ramp/jump** over sand |
+| 8 | Mount Magma Mayhem | 4 | **Volcano** + lava hazard |
+| 9 | Sugar-Rush Fooze Finale | 5 | Candy spectacle finale + **shortcut** ramp + windmill |
 
 Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent height field; **slope dominates wind**. Boards are roomy (~1.5× prior footprint) for phone-filling putts.
 

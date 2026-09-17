@@ -69,9 +69,9 @@ export class Renderer {
 
     const totalW = hole.width + this.pad * 2;
     const totalH = hole.height + this.pad * 2;
-    // Leave a slim top band for the theme headline so it never steals
+    // Leave a top band for the hole-title headline so it never steals
     // fairway pixels from the fit; plaque/wind use leftover pockets.
-    const topChrome = Math.min(52, maxH * 0.08);
+    const topChrome = Math.min(64, Math.max(48, maxH * 0.09));
     const playW = maxW;
     const playH = Math.max(120, maxH - topChrome);
     const fit = Math.min(playW / totalW, playH / totalH);
@@ -279,7 +279,7 @@ export class Renderer {
     const g0 = this.worldToScreen(gb.minX, gb.minY);
     const g1 = this.worldToScreen(gb.maxX, gb.maxY);
     const greenScreen = { minX: g0.x, minY: g0.y, maxX: g1.x, maxY: g1.y };
-    drawThemeHeadline(ctx, theme, this.viewW, this.viewH, greenScreen);
+    drawThemeHeadline(ctx, hole, theme, this.viewW, this.viewH, greenScreen);
     drawWindKeyScreen(ctx, hole, this.viewW, this.viewH, greenScreen);
     drawHolePlaqueScreen(ctx, hole, this.viewW, this.viewH, greenScreen, holeScores);
     this.endScreenSpace();
@@ -793,62 +793,332 @@ function drawChevron(
 
 type ScreenRect = { minX: number; minY: number; maxX: number; maxY: number };
 
-/** Big theme name headline in CSS-pixel chrome (top of the play area). */
+/** Big combined hole-title headline in CSS-pixel chrome (same copy as plaque). */
 function drawThemeHeadline(
   ctx: CanvasRenderingContext2D,
+  hole: HoleDef,
   theme: HoleTheme,
   viewW: number,
   _viewH: number,
   green: ScreenRect,
 ): void {
-  const label = theme.label.toUpperCase();
+  const label = hole.name.toUpperCase();
+  const nowSec = performance.now() / 1000;
   // Prefer the strip above the green; fall back to top of canvas.
   const gapAbove = green.minY;
-  const y = gapAbove >= 44 ? Math.min(green.minY - 18, 40) : 28;
+  const y = gapAbove >= 48 ? Math.min(green.minY - 20, 42) : 30;
 
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // Fit headline to width without looking timid.
-  let size = Math.round(Math.min(42, Math.max(26, viewW * 0.065)));
+  // Bigger, bolder fit — leave room for flanking emblems.
+  const iconR = Math.round(Math.min(22, Math.max(14, viewW * 0.032)));
+  let size = Math.round(Math.min(48, Math.max(28, viewW * 0.072)));
   ctx.font = `900 ${size}px system-ui,sans-serif`;
-  while (size > 20 && ctx.measureText(label).width > viewW - 28) {
+  const maxText = viewW - 28 - (iconR * 2 + 28) * 2;
+  while (size > 18 && ctx.measureText(label).width > maxText) {
     size -= 1;
     ctx.font = `900 ${size}px system-ui,sans-serif`;
   }
 
   const tw = ctx.measureText(label).width;
-  const padX = 18;
-  const boxW = tw + padX * 2;
-  const boxH = size + 16;
+  const padX = 22;
+  const boxW = tw + padX * 2 + (iconR * 2 + 14) * 2;
+  const boxH = Math.max(size + 18, iconR * 2 + 12);
   const x = viewW / 2;
 
-  // Soft plate behind the title
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 12);
+  // Soft plate with theme-tinted rim
+  ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
   ctx.fill();
+  ctx.strokeStyle = theme.accent;
+  ctx.globalAlpha = 0.55 + Math.sin(nowSec * 2.4) * 0.12;
+  ctx.lineWidth = 2.5;
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
 
-  // Gradient + shadow for pop
-  ctx.shadowColor = 'rgba(0,0,0,0.65)';
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 3;
+  // Flanking canvas emblems (theme / features)
+  drawHoleTitleEmblem(ctx, hole, theme, x - tw / 2 - padX / 2 - iconR, y, iconR, nowSec);
+  drawHoleTitleEmblem(ctx, hole, theme, x + tw / 2 + padX / 2 + iconR, y, iconR, nowSec);
+
+  // Animated shimmer / pulse glow behind the type
+  const pulse = 0.55 + Math.sin(nowSec * 3.1) * 0.25;
+  ctx.shadowColor = theme.accent;
+  ctx.shadowBlur = 14 + pulse * 10;
+  ctx.shadowOffsetY = 0;
+
+  const shimmer = (Math.sin(nowSec * 2.2) + 1) * 0.5;
   const grad = ctx.createLinearGradient(x - tw / 2, y - size / 2, x + tw / 2, y + size / 2);
   grad.addColorStop(0, '#ffffff');
-  grad.addColorStop(0.45, theme.trim);
-  grad.addColorStop(1, theme.accent);
+  grad.addColorStop(Math.max(0.08, 0.25 + shimmer * 0.35), theme.trim);
+  grad.addColorStop(Math.min(0.92, 0.55 + shimmer * 0.3), theme.accent);
+  grad.addColorStop(1, theme.trim);
   ctx.fillStyle = grad;
-  ctx.letterSpacing = '0.12em';
+  ctx.letterSpacing = '0.08em';
   ctx.font = `900 ${size}px system-ui,sans-serif`;
   ctx.fillText(label, x, y + 1);
   ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
 
-  // Bright stroke edge for contrast on every theme
-  ctx.lineWidth = Math.max(1.5, size * 0.045);
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  // Dark edge for contrast on every theme
+  ctx.lineWidth = Math.max(1.75, size * 0.05);
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
   ctx.strokeText(label, x, y + 1);
+
+  // Soft highlight stroke in trim
+  ctx.globalAlpha = 0.35 + shimmer * 0.25;
+  ctx.lineWidth = Math.max(1, size * 0.025);
+  ctx.strokeStyle = theme.trim;
+  ctx.strokeText(label, x, y + 1);
+  ctx.globalAlpha = 1;
   ctx.restore();
+}
+
+/** Tiny canvas emblem beside the hole title — no external assets. */
+function drawHoleTitleEmblem(
+  ctx: CanvasRenderingContext2D,
+  hole: HoleDef,
+  theme: HoleTheme,
+  cx: number,
+  cy: number,
+  r: number,
+  nowSec: number,
+): void {
+  const feats = hole.features ?? [];
+  let kind: string = theme.decor;
+  if (feats.includes('windmill') || hole.props?.some((p) => p.kind === 'windmill')) kind = 'windmill';
+  else if (feats.includes('volcano') || hole.props?.some((p) => p.kind === 'volcano')) kind = 'volcano';
+  else if (feats.includes('water') || theme.decor === 'waves') kind = 'waves';
+  else if (feats.includes('ramp') || feats.includes('jump')) kind = 'ramp';
+  else if (theme.id === 'neon') kind = 'neon';
+  else if (theme.id === 'space') kind = 'stars';
+  else if (theme.id === 'candy') kind = 'candy';
+  else if (theme.id === 'desert') kind = 'cacti';
+  else if (theme.id === 'tropical') kind = 'palms';
+  else if (theme.id === 'autumn') kind = 'leaves';
+  else if (theme.id === 'castle') kind = 'stones';
+  else if (theme.id === 'arctic') kind = 'snow';
+  else if (theme.id === 'pirate') kind = 'waves';
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  const spin = Math.sin(nowSec * 1.6) * 0.08;
+  ctx.rotate(spin);
+
+  // Disc backing
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fill();
+  ctx.strokeStyle = theme.trim;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = theme.accent;
+  ctx.strokeStyle = theme.trim;
+  ctx.lineWidth = 1.75;
+
+  switch (kind) {
+    case 'windmill': {
+      ctx.fillStyle = theme.trim;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = Math.max(2, r * 0.18);
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2 + nowSec * 1.2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * r * 0.2, Math.sin(a) * r * 0.2);
+        ctx.lineTo(Math.cos(a) * r * 0.78, Math.sin(a) * r * 0.78);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'volcano': {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, r * 0.55);
+      ctx.lineTo(-r * 0.15, -r * 0.35);
+      ctx.lineTo(0, -r * 0.05);
+      ctx.lineTo(r * 0.15, -r * 0.35);
+      ctx.lineTo(r * 0.7, r * 0.55);
+      ctx.closePath();
+      ctx.fillStyle = '#5a3030';
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = theme.accent;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.12, -r * 0.2);
+      ctx.lineTo(0, -r * 0.7);
+      ctx.lineTo(r * 0.12, -r * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'waves': {
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = Math.max(2, r * 0.16);
+      for (let i = 0; i < 3; i++) {
+        const yy = -r * 0.35 + i * r * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.7, yy);
+        ctx.quadraticCurveTo(-r * 0.35, yy - r * 0.22, 0, yy);
+        ctx.quadraticCurveTo(r * 0.35, yy + r * 0.22, r * 0.7, yy);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'ramp': {
+      ctx.fillStyle = theme.trim;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, r * 0.45);
+      ctx.lineTo(r * 0.15, -r * 0.55);
+      ctx.lineTo(r * 0.7, -r * 0.55);
+      ctx.lineTo(r * 0.7, r * 0.45);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = theme.accent;
+      ctx.stroke();
+      // ball arc hint
+      ctx.beginPath();
+      ctx.arc(r * 0.15, -r * 0.2, r * 0.14, 0, Math.PI * 2);
+      ctx.fillStyle = theme.accent;
+      ctx.fill();
+      break;
+    }
+    case 'neon': {
+      ctx.strokeStyle = theme.accent;
+      ctx.shadowColor = theme.accent;
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-r * 0.45, -r * 0.45, r * 0.9, r * 0.9);
+      ctx.strokeStyle = theme.trim;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.2, r * 0.15);
+      ctx.lineTo(0, -r * 0.35);
+      ctx.lineTo(r * 0.2, r * 0.15);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      break;
+    }
+    case 'stars': {
+      ctx.fillStyle = theme.trim;
+      for (const [sx, sy, sr] of [
+        [0, -0.15, 0.35],
+        [-0.45, 0.35, 0.18],
+        [0.48, 0.28, 0.16],
+      ] as const) {
+        drawStar(ctx, sx * r, sy * r, sr * r, 5);
+      }
+      break;
+    }
+    case 'candy': {
+      ctx.rotate(nowSec * 0.8);
+      for (let i = 0; i < 6; i++) {
+        ctx.fillStyle = i % 2 ? theme.accent : theme.trim;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, r * 0.7, (i * Math.PI) / 3, ((i + 1) * Math.PI) / 3);
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
+    case 'cacti': {
+      ctx.fillStyle = '#2f8f4e';
+      ctx.fillRect(-r * 0.12, -r * 0.55, r * 0.24, r * 1.1);
+      ctx.fillRect(-r * 0.5, -r * 0.1, r * 0.38, r * 0.18);
+      ctx.fillRect(r * 0.12, r * 0.05, r * 0.38, r * 0.18);
+      ctx.fillRect(-r * 0.5, -r * 0.35, r * 0.18, r * 0.28);
+      ctx.fillRect(r * 0.32, -r * 0.2, r * 0.18, r * 0.28);
+      break;
+    }
+    case 'palms': {
+      ctx.strokeStyle = '#6b4226';
+      ctx.lineWidth = Math.max(2, r * 0.14);
+      ctx.beginPath();
+      ctx.moveTo(0, r * 0.65);
+      ctx.quadraticCurveTo(-r * 0.1, 0, 0, -r * 0.2);
+      ctx.stroke();
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = Math.max(1.5, r * 0.1);
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, -r * 0.15);
+        ctx.quadraticCurveTo(i * r * 0.35, -r * 0.55, i * r * 0.55, -r * 0.15);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'leaves': {
+      ctx.fillStyle = theme.accent;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.65);
+      ctx.quadraticCurveTo(r * 0.7, 0, 0, r * 0.65);
+      ctx.quadraticCurveTo(-r * 0.7, 0, 0, -r * 0.65);
+      ctx.fill();
+      ctx.strokeStyle = theme.trim;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.5);
+      ctx.lineTo(0, r * 0.5);
+      ctx.stroke();
+      break;
+    }
+    case 'stones': {
+      ctx.fillStyle = theme.trim;
+      ctx.fillRect(-r * 0.55, -r * 0.15, r * 1.1, r * 0.55);
+      ctx.fillRect(-r * 0.4, -r * 0.55, r * 0.28, r * 0.45);
+      ctx.fillRect(r * 0.12, -r * 0.55, r * 0.28, r * 0.45);
+      ctx.strokeStyle = theme.accent;
+      ctx.strokeRect(-r * 0.55, -r * 0.15, r * 1.1, r * 0.55);
+      break;
+    }
+    case 'snow': {
+      ctx.strokeStyle = theme.trim;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        const a = (i * Math.PI) / 3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * -r * 0.55, Math.sin(a) * -r * 0.55);
+        ctx.lineTo(Math.cos(a) * r * 0.55, Math.sin(a) * r * 0.55);
+        ctx.stroke();
+      }
+      ctx.fillStyle = theme.accent;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    default: {
+      ctx.fillStyle = theme.accent;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+function drawStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  points: number,
+): void {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const a = (i * Math.PI) / points - Math.PI / 2;
+    const rad = i % 2 === 0 ? r : r * 0.4;
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 /**
@@ -1708,15 +1978,27 @@ function drawHolePlaqueScreen(
   ctx.font = '900 26px system-ui,sans-serif';
   ctx.fillText(`HOLE ${hole.id}`, cx, y + 30);
 
-  ctx.fillStyle = '#120d06';
+  const theme = THEMES[hole.theme] ?? THEMES.tropical;
   let nameSize = 28;
   ctx.font = `900 ${nameSize}px system-ui,sans-serif`;
   const name = hole.name;
-  while (nameSize > 18 && ctx.measureText(name).width > boxW - 28) {
+  while (nameSize > 16 && ctx.measureText(name).width > boxW - 28) {
     nameSize -= 1;
     ctx.font = `900 ${nameSize}px system-ui,sans-serif`;
   }
+  // Same combined title as the top headline — theme-accented for pop.
+  ctx.shadowColor = theme.accent;
+  ctx.shadowBlur = 6;
+  const nameGrad = ctx.createLinearGradient(cx - 80, y + 50, cx + 80, y + 78);
+  nameGrad.addColorStop(0, '#1a1008');
+  nameGrad.addColorStop(0.45, theme.accent);
+  nameGrad.addColorStop(1, '#1a1008');
+  ctx.fillStyle = nameGrad;
   ctx.fillText(name, cx, y + 64);
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.25;
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.strokeText(name, cx, y + 64);
 
   ctx.font = '800 20px system-ui,sans-serif';
   ctx.fillStyle = '#2f1b08';
