@@ -25,15 +25,28 @@ export const WIND_ALONG = 0.0045;
 export const WIND_SPEED_REF = 7.5;
 /**
  * Gravity-style scale for topo break: a ≈ SLOPE_G * (−∇h · L).
- * Tuned so medium putts break/speed-up/slow-down obviously; stronger than wind.
+ * Milder than the original 0.145 so break is readable but not severe; still >> wind.
  */
-export const SLOPE_G = 0.145;
+export const SLOPE_G = 0.085;
 /** Cap on scaled downhill magnitude (after ·L). Keeps extreme bumps playable. */
 export const SLOPE_GRAD_CAP = 0.9;
 /** Radius multiplier around cup where slope force is faded so cups still capture. */
 export const CUP_SLOPE_FADE = 2.4;
 /** Legacy alias — some UI may reference SLOPE_ACCEL. */
 export const SLOPE_ACCEL = SLOPE_G;
+/**
+ * Speed at which slope reaches full strength. Fades near stop so friction can
+ * win and the ball settles (no infinite downhill creep / soft-lock).
+ */
+export const SLOPE_SPEED_REF = 4.5;
+/** Speed below which we start counting toward a settle (allow next putt). */
+export const SETTLE_SPEED = 0.32;
+/** Consecutive outer steps at low speed before forcing settle / unstick. */
+export const SETTLE_STEPS = 18;
+/** Faster settle when jammed against walls/boundary. */
+export const STUCK_SETTLE_STEPS = 4;
+/** Nudge distance (px) when unsticking from a corner/wall. */
+export const UNSTICK_NUDGE = 3.5;
 
 export type BallState = {
   pos: Vec2;
@@ -49,6 +62,13 @@ export type BallState = {
   airHeight?: number;
   /** Suppress re-triggering the same ramp until clear. */
   rampCooldown?: number;
+  /**
+   * Ball is waiting for a putt — fully frozen (no slope / idle roll).
+   * Set on tee create, hazard reset, and after settle/unstick; cleared by applyPutt.
+   */
+  awaitingPutt?: boolean;
+  /** Outer stepBall calls spent near-stopped (for settle / unstick). */
+  settleSteps?: number;
 };
 
 function circleAabbResolve(cx: number, cy: number, r: number, wall: Wall): Vec2 | null {
@@ -109,13 +129,16 @@ function collideBumper(ball: BallState, b: Bumper): void {
   if (speed < 3) ball.vel = scale(n, 4.5);
 }
 
-function collideWalls(ball: BallState, walls: Wall[]): void {
+function collideWalls(ball: BallState, walls: Wall[]): boolean {
+  let hit = false;
   for (const wall of walls) {
     const push = circleAabbResolve(ball.pos.x, ball.pos.y, ball.radius, wall);
     if (!push) continue;
     ball.pos = add(ball.pos, push);
     ball.vel = reflectVelocity(ball.vel, push);
+    hit = true;
   }
+  return hit;
 }
 
 function pointInPoly(px: number, py: number, poly: Vec2[]): boolean {
@@ -144,8 +167,8 @@ function closestOnSeg(px: number, py: number, ax: number, ay: number, bx: number
  * Keep the ball inside the green polygon by colliding with boundary edges.
  * Push is along the inward normal of the nearest edge.
  */
-function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
-  if (green.length < 3) return;
+function collideGreenBoundary(ball: BallState, green: Vec2[]): { hit: boolean; nx: number; ny: number } {
+  if (green.length < 3) return { hit: false, nx: 0, ny: 0 };
   const r = ball.radius;
   const cx = ball.pos.x;
   const cy = ball.pos.y;
@@ -195,7 +218,7 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
     }
   }
 
-  if (bestOverlap <= 0 || !Number.isFinite(bestOverlap)) return;
+  if (bestOverlap <= 0 || !Number.isFinite(bestOverlap)) return { hit: false, nx: 0, ny: 0 };
 
   if (!inside) {
     let nearest = { x: cx, y: cy };
@@ -212,11 +235,12 @@ function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
     }
     ball.pos = { x: nearest.x + bestNx * (r + 0.5), y: nearest.y + bestNy * (r + 0.5) };
     ball.vel = reflectVelocity(ball.vel, { x: bestNx, y: bestNy });
-    return;
+    return { hit: true, nx: bestNx, ny: bestNy };
   }
 
   ball.pos = add(ball.pos, scale({ x: bestNx, y: bestNy }, bestOverlap + 0.15));
   ball.vel = reflectVelocity(ball.vel, { x: bestNx, y: bestNy });
+  return { hit: true, nx: bestNx, ny: bestNy };
 }
 
 function applyCupCapture(ball: BallState, hole: HoleDef): boolean {
@@ -362,6 +386,8 @@ function resetHazard(ball: BallState, hole: HoleDef): void {
   ball.cupResidence = 0;
   ball.airborne = 0;
   ball.airHeight = 0;
+  ball.awaitingPutt = true;
+  ball.settleSteps = 0;
 }
 
 export function createBall(tee: Vec2): BallState {
@@ -374,15 +400,41 @@ export function createBall(tee: Vec2): BallState {
     airborne: 0,
     airHeight: 0,
     rampCooldown: 0,
+    awaitingPutt: true,
+    settleSteps: 0,
   };
 }
 
 export function isMoving(ball: BallState): boolean {
+  if (ball.awaitingPutt) return false;
   return !ball.sunk && (len(ball.vel) > MIN_SPEED || (ball.airborne ?? 0) > 0);
 }
 
+/** Force-stop and optionally nudge off jammed geometry so the player can putt. */
+function settleBall(
+  ball: BallState,
+  green: Vec2[],
+  walls: Wall[],
+  nudgeDir: Vec2 | null,
+): void {
+  ball.vel = { x: 0, y: 0 };
+  ball.settleSteps = 0;
+  ball.awaitingPutt = true;
+  if (nudgeDir && (nudgeDir.x !== 0 || nudgeDir.y !== 0)) {
+    const nl = len(nudgeDir) || 1;
+    ball.pos = {
+      x: ball.pos.x + (nudgeDir.x / nl) * UNSTICK_NUDGE,
+      y: ball.pos.y + (nudgeDir.y / nl) * UNSTICK_NUDGE,
+    };
+    // Re-clamp inside green / off walls after nudge
+    collideGreenBoundary(ball, green);
+    collideWalls(ball, walls);
+    ball.vel = { x: 0, y: 0 };
+  }
+}
+
 export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
-  if (ball.sunk) return;
+  if (ball.sunk || ball.awaitingPutt) return;
 
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
   const h = dt / steps;
@@ -398,6 +450,9 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
   const nowSec = performance.now() / 1000;
   const props = hole.props ?? [];
   const ramps = hole.ramps ?? [];
+  let geomHit = false;
+  let nudgeNx = 0;
+  let nudgeNy = 0;
 
   for (let i = 0; i < steps; i++) {
     if (ball.sunk) return;
@@ -411,8 +466,15 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
     // Green break from height field (same field as the Green Map overlay).
     // force ≈ −g · ∇h (via sampleDownhill which returns −∇h·L). Stronger than wind.
     // Skipped while airborne. Faded near the cup so slope cannot spit balls out.
+    // Wind secondary to topo; none while airborne.
+    const speedBefore = len(ball.vel);
+    // Slope break while rolling — faded near stop so balls can settle for the next putt.
+    const slopeSpeedFade = Math.min(
+      1,
+      Math.max(0, (speedBefore - MIN_SPEED) / (SLOPE_SPEED_REF - MIN_SPEED)),
+    );
     let slopePull = 0;
-    if (!flying && hole.topo) {
+    if (!flying && slopeSpeedFade > 0 && hole.topo) {
       const bounds = polyBounds(green);
       const downhill = sampleDownhill(hole.topo, ball.pos.x, ball.pos.y, bounds);
       const dm = Math.hypot(downhill.x, downhill.y);
@@ -428,19 +490,23 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
           sx *= fade;
           sy *= fade;
         }
-        slopePull = Math.hypot(sx, sy) * SLOPE_G;
+        slopePull = Math.hypot(sx, sy) * SLOPE_G * slopeSpeedFade;
+        const sMul = SLOPE_G * h * 60 * slopeSpeedFade;
         ball.vel = {
-          x: ball.vel.x + sx * SLOPE_G * h * 60,
-          y: ball.vel.y + sy * SLOPE_G * h * 60,
+          x: ball.vel.x + sx * sMul,
+          y: ball.vel.y + sy * sMul,
         };
       }
-    } else if (!flying && hole.slope && (hole.slope.x !== 0 || hole.slope.y !== 0)) {
-      slopePull = len(hole.slope) * SLOPE_G * 0.55;
-      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_G * 0.55 * h * 60));
+    } else if (
+      !flying &&
+      slopeSpeedFade > 0 &&
+      hole.slope &&
+      (hole.slope.x !== 0 || hole.slope.y !== 0)
+    ) {
+      slopePull = len(hole.slope) * SLOPE_G * 0.55 * slopeSpeedFade;
+      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_G * 0.55 * h * 60 * slopeSpeedFade));
     }
 
-    // Wind secondary to topo; none while airborne.
-    const speedBefore = len(ball.vel);
     const mph = hole.windMph ?? 0;
     const wind = hole.wind;
     if (!flying && speedBefore > MIN_SPEED && mph > 0 && wind) {
@@ -496,8 +562,15 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
       }
     } else {
       ball.airHeight = 0;
-      collideGreenBoundary(ball, green);
-      collideWalls(ball, hole.walls);
+      const bound = collideGreenBoundary(ball, green);
+      if (bound.hit) {
+        geomHit = true;
+        nudgeNx += bound.nx;
+        nudgeNy += bound.ny;
+      }
+      if (collideWalls(ball, hole.walls)) {
+        geomHit = true;
+      }
       for (const bumper of hole.bumpers) collideBumper(ball, bumper);
       collideVolcanoHub(ball, props);
       collideWindmills(ball, props, nowSec);
@@ -519,16 +592,79 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
     if (applyCupCapture(ball, hole)) return;
 
     const speed = len(ball.vel);
-    // Only freeze when nearly stopped AND slope cannot keep the ball rolling downhill.
-    // A ball released with tiny velocity on a slope must accelerate down the fall line.
-    if (
-      speed < MIN_SPEED &&
-      (ball.airborne ?? 0) <= 0 &&
-      slopePull < MIN_SPEED * 0.35
-    ) {
+    // Near-stop: zero vel. Slope is speed-faded so it cannot restart from rest.
+    if (speed < MIN_SPEED && (ball.airborne ?? 0) <= 0) {
       ball.vel = { x: 0, y: 0 };
     }
   }
+
+  // Settle / unstick: never soft-lock the player when nearly stopped (esp. corners).
+  if (!ball.sunk && (ball.airborne ?? 0) <= 0) {
+    const speed = len(ball.vel);
+    if (speed < SETTLE_SPEED) {
+      ball.settleSteps = (ball.settleSteps ?? 0) + 1;
+      const need = geomHit ? STUCK_SETTLE_STEPS : SETTLE_STEPS;
+      if (ball.settleSteps >= need || speed < MIN_SPEED * 0.5) {
+        const nudge =
+          geomHit && (nudgeNx !== 0 || nudgeNy !== 0)
+            ? { x: nudgeNx, y: nudgeNy }
+            : geomHit
+              ? estimateInwardNudge(ball.pos, green, hole.walls)
+              : null;
+        settleBall(ball, green, hole.walls, nudge);
+      }
+    } else {
+      ball.settleSteps = 0;
+    }
+  }
+}
+
+/** Prefer inward green normal; else push away from nearest wall center. */
+function estimateInwardNudge(pos: Vec2, green: Vec2[], walls: Wall[]): Vec2 | null {
+  if (green.length >= 3) {
+    let bestD = Infinity;
+    let nx = 0;
+    let ny = 0;
+    for (let i = 0; i < green.length; i++) {
+      const a = green[i];
+      const b = green[(i + 1) % green.length];
+      const c = closestOnSeg(pos.x, pos.y, a.x, a.y, b.x, b.y);
+      const d = Math.hypot(pos.x - c.x, pos.y - c.y);
+      if (d >= bestD) continue;
+      bestD = d;
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      let ix = -ey;
+      let iy = ex;
+      const nl = Math.hypot(ix, iy) || 1;
+      ix /= nl;
+      iy /= nl;
+      const mx = (a.x + b.x) / 2 + ix * 2;
+      const my = (a.y + b.y) / 2 + iy * 2;
+      if (!pointInPoly(mx, my, green)) {
+        ix = -ix;
+        iy = -iy;
+      }
+      nx = ix;
+      ny = iy;
+    }
+    if (bestD < BALL_RADIUS * 2.5) return { x: nx, y: ny };
+  }
+  let nearest: Wall | null = null;
+  let nd = Infinity;
+  for (const w of walls) {
+    const cx = clamp(pos.x, w.x, w.x + w.w);
+    const cy = clamp(pos.y, w.y, w.y + w.h);
+    const d = Math.hypot(pos.x - cx, pos.y - cy);
+    if (d < nd) {
+      nd = d;
+      nearest = w;
+    }
+  }
+  if (!nearest || nd > BALL_RADIUS * 2.5) return null;
+  const wx = nearest.x + nearest.w / 2;
+  const wy = nearest.y + nearest.h / 2;
+  return { x: pos.x - wx, y: pos.y - wy };
 }
 
 export function applyPutt(ball: BallState, dir: Vec2, power01: number): void {
@@ -537,4 +673,6 @@ export function applyPutt(ball: BallState, dir: Vec2, power01: number): void {
   const d = len(dir) < 1e-6 ? { x: 0, y: -1 } : { x: dir.x / len(dir), y: dir.y / len(dir) };
   ball.vel = scale(d, p);
   ball.cupResidence = 0;
+  ball.awaitingPutt = false;
+  ball.settleSteps = 0;
 }

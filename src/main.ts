@@ -556,6 +556,8 @@ function applyRemotePutt(msg: Extract<NetMessage, { type: 'putt' }>): void {
   b.pos = { ...msg.ball };
   b.vel = { x: msg.vx, y: msg.vy };
   b.sunk = false;
+  b.awaitingPutt = false;
+  b.settleSteps = 0;
   holeStrokes.set(msg.playerId, msg.strokes);
   const p = players.find((x) => x.id === msg.playerId);
   if (p) p.strokes[holeIndex] = msg.strokes;
@@ -648,6 +650,9 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
         b.pos = { ...p.ball };
         b.vel = { ...p.vel };
         b.sunk = p.sunk;
+        const moving = Math.hypot(p.vel.x, p.vel.y) > 0.08;
+        b.awaitingPutt = !moving && !p.sunk;
+        b.settleSteps = 0;
         balls.set(p.id, b);
         if (p.strokes[holeIndex] != null) holeStrokes.set(p.id, p.strokes[holeIndex]);
       }
@@ -713,6 +718,9 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
         b.pos = { ...p.ball };
         b.vel = { ...p.vel };
         b.sunk = p.sunk;
+        const moving = Math.hypot(p.vel.x, p.vel.y) > 0.08;
+        b.awaitingPutt = !moving && !p.sunk;
+        b.settleSteps = 0;
         balls.set(p.id, b);
         holeStrokes.set(p.id, p.strokes[holeIndex] ?? 0);
       }
