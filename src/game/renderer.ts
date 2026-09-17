@@ -474,8 +474,33 @@ function drawSlopeCues(
 }
 
 /**
+ * Elevation heatmap stops: purple (lowest) → blue → green → yellow → orange → red (highest).
+ * Contours/arrows stay professional; only the fill scale uses these colors.
+ */
+function elevationHeatRgb(t: number): [number, number, number] {
+  const stops: [number, number, number][] = [
+    [128, 60, 180], // purple — lowest
+    [50, 100, 220], // blue
+    [40, 170, 90], // green
+    [230, 210, 50], // yellow
+    [240, 140, 40], // orange
+    [220, 50, 50], // red — highest
+  ];
+  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const i = Math.floor(x);
+  const f = x - i;
+  const a = stops[i];
+  const b = stops[Math.min(i + 1, stops.length - 1)];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
+/**
  * StrackaLine / green-book overlay from the SAME height field as physics.
- * Soft elevation heatmap (cool=low, warm=high), neat contour isolines,
+ * Soft elevation heatmap (purple low → red high), neat contour isolines,
  * small downhill tick-arrows. Low opacity so carpet still reads.
  */
 function drawGreenMapOverlay(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
@@ -518,15 +543,12 @@ function drawGreenMapOverlay(ctx: CanvasRenderingContext2D, hole: HoleDef, green
 
   ctx.save();
 
-  // --- Soft elevation heatmap (cool low → warm high), low opacity ---
+  // --- Soft elevation heatmap (purple low → red high), low opacity ---
   for (const c of grid) {
     if (!c.inside) continue;
     const t = (c.h - minH) / hRange; // 0 low … 1 high
-    // Professional blue→teal→amber→rose (not toy neon)
-    const r = Math.round(70 + t * 160);
-    const gCol = Math.round(130 + Math.sin(t * Math.PI) * 40 - t * 30);
-    const b = Math.round(200 - t * 150);
-    const a = 0.1 + t * 0.16; // carpet still reads
+    const [r, gCol, b] = elevationHeatRgb(t);
+    const a = 0.12 + t * 0.18; // carpet still reads
     ctx.fillStyle = `rgba(${r},${gCol},${b},${a})`;
     ctx.fillRect(c.x - step / 2, c.y - step / 2, step + 0.5, step + 0.5);
   }
@@ -658,12 +680,10 @@ function drawGreenMapOverlay(ctx: CanvasRenderingContext2D, hole: HoleDef, green
   ctx.fillStyle = 'rgba(12, 20, 32, 0.55)';
   roundRect(ctx, lx, ly, 132, 30, 6);
   ctx.fill();
-  // mini gradient bar
+  // mini gradient bar (same purple→…→red scale)
   for (let i = 0; i < 40; i++) {
     const t = i / 39;
-    const r = Math.round(70 + t * 160);
-    const gCol = Math.round(130 + Math.sin(t * Math.PI) * 40 - t * 30);
-    const b = Math.round(200 - t * 150);
+    const [r, gCol, b] = elevationHeatRgb(t);
     ctx.fillStyle = `rgba(${r},${gCol},${b},0.85)`;
     ctx.fillRect(lx + 8 + i * 1.15, ly + 7, 1.3, 8);
   }

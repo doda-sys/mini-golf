@@ -393,6 +393,20 @@ function broadcastSync(): void {
   });
 }
 
+/** Format strokes vs par: E, +2, -3, etc. */
+function formatToPar(diff: number): string {
+  if (diff === 0) return 'E';
+  return diff > 0 ? `+${diff}` : String(diff);
+}
+
+function scoreDiffClass(diff: number): string {
+  if (diff <= -2) return 'score-eagle';
+  if (diff === -1) return 'score-birdie';
+  if (diff === 0) return 'score-par';
+  if (diff === 1) return 'score-bogey';
+  return 'score-double';
+}
+
 function openScorecard(final: boolean): void {
   scoreTitle.textContent = final ? 'Final Scores' : `Hole ${holeIndex + 1} Complete`;
   const table = el('table', { class: 'score-table' });
@@ -400,6 +414,7 @@ function openScorecard(final: boolean): void {
   head.append(el('th', { text: 'Player' }));
   for (let i = 0; i <= holeIndex; i++) head.append(el('th', { text: String(i + 1) }));
   head.append(el('th', { text: 'Tot' }));
+  head.append(el('th', { text: '+/−', title: 'Score relative to par' }));
   table.append(head);
 
   // Par row — per-hole par + total par for holes played (and full 9 when final)
@@ -413,6 +428,7 @@ function openScorecard(final: boolean): void {
   }
   const fullNinePar = HOLES.reduce((a, h) => a + h.par, 0);
   parRow.append(el('td', { class: 'total', text: String(parSumShown) }));
+  parRow.append(el('td', { class: 'total', text: 'E' }));
   table.append(parRow);
 
   const sorted = [...players].sort((a, b) => a.totalStrokes - b.totalStrokes);
@@ -422,25 +438,34 @@ function openScorecard(final: boolean): void {
     for (let i = 0; i <= holeIndex; i++) {
       const strokes = p.strokes[i];
       const par = HOLES[i]?.par ?? 4;
-      const td = el('td', { text: strokes != null ? String(strokes) : '—' });
+      const td = el('td');
       if (strokes != null) {
         const diff = strokes - par;
-        if (diff <= -2) td.className = 'score-eagle';
-        else if (diff === -1) td.className = 'score-birdie';
-        else if (diff === 0) td.className = 'score-par';
-        else if (diff === 1) td.className = 'score-bogey';
-        else if (diff >= 2) td.className = 'score-double';
+        td.className = scoreDiffClass(diff);
+        // Strokes + clear vs-par (E / +1 / -2)
+        const vs = el('span', { class: 'vs-par', text: formatToPar(diff) });
+        const stk = el('span', { class: 'hole-strokes', text: String(strokes) });
+        td.append(vs, stk);
+        td.title = `${strokes} strokes · ${formatToPar(diff)} vs par ${par}`;
+      } else {
+        td.textContent = '—';
       }
       tr.append(td);
     }
+    const toPar = p.totalStrokes - parSumShown;
     const tot = el('td', { class: 'total', text: String(p.totalStrokes) });
-    tr.append(tot);
+    const rel = el('td', {
+      class: `total to-par ${scoreDiffClass(toPar)}`,
+      text: formatToPar(toPar),
+    });
+    rel.title = `${p.totalStrokes} strokes vs par ${parSumShown}`;
+    tr.append(tot, rel);
     table.append(tr);
   }
 
   const parNote = el('p', {
     class: 'hint',
-    text: `Course par (9): ${fullNinePar} · Through hole ${holeIndex + 1}: ${parSumShown}`,
+    text: `Course par (9): ${fullNinePar} · Through hole ${holeIndex + 1}: par ${parSumShown} · Scores shown vs par (E / + / −)`,
   });
   scoreBody.replaceChildren(table, parNote);
   const more = holeIndex < HOLES.length - 1;
