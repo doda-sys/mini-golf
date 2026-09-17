@@ -612,7 +612,7 @@ function applyChipDot(dot: HTMLElement, color: string): void {
 
 function postLocalHoleScore(strokes: number): void {
   if (holeScorePostedForIndex === holeIndex) return;
-  if (!(strokes >= 1 && strokes <= 15)) return;
+  if (!(strokes >= 1)) return;
   holeScorePostedForIndex = holeIndex;
   const holeNum = getHole(holeIndex).id;
   const name = localPlayer()?.name || playerName();
