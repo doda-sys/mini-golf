@@ -69,27 +69,104 @@ export class Renderer {
 
     const totalW = hole.width + this.pad * 2;
     const totalH = hole.height + this.pad * 2;
-    // Leave a top band for the hole-title headline so it never steals
-    // fairway pixels from the fit; plaque/wind use leftover pockets.
-    const topChrome = Math.min(64, Math.max(48, maxH * 0.09));
-    const playW = maxW;
-    const playH = Math.max(120, maxH - topChrome);
-    const fit = Math.min(playW / totalW, playH / totalH);
-    this.scale = fit;
-    const worldViewW = totalW * fit;
-    const worldViewH = totalH * fit;
-    this.worldOx = (playW - worldViewW) / 2;
-    this.worldOy = topChrome + (playH - worldViewH) / 2;
+    const gb = polyBounds(hole.green);
+
+    // Compact chrome targets — readable, but fairway stays the star.
+    const HEADLINE_H = Math.round(Math.min(44, Math.max(34, maxH * 0.055)));
+    const PLAQUE_W = Math.round(Math.min(188, Math.max(152, maxW * 0.28)));
+    const PLAQUE_H = Math.round(Math.min(168, Math.max(132, maxH * 0.22)));
+    const WIND_S = Math.round(Math.min(96, Math.max(78, Math.min(maxW, maxH) * 0.12)));
+    const GAP = 8;
+
+    type Margins = { top: number; bottom: number; left: number; right: number };
+    // Prefer maximizing the green; only reserve side/bottom chrome when
+    // natural pockets cannot host the compact plaque + wind off-green.
+    const candidates: Margins[] = [
+      { top: HEADLINE_H, bottom: 0, left: 0, right: 0 },
+      { top: HEADLINE_H, bottom: PLAQUE_H + GAP, left: 0, right: 0 },
+      { top: HEADLINE_H, bottom: 0, left: PLAQUE_W + GAP, right: 0 },
+      { top: HEADLINE_H, bottom: 0, left: 0, right: PLAQUE_W + GAP },
+      { top: HEADLINE_H, bottom: 0, left: PLAQUE_W + GAP, right: WIND_S + GAP },
+      { top: HEADLINE_H, bottom: 0, left: WIND_S + GAP, right: PLAQUE_W + GAP },
+    ];
+
+    let bestFit = -1;
+    let bestOx = 0;
+    let bestOy = 0;
+    let bestScale = 1;
+
+    for (const m of candidates) {
+      const playW = Math.max(80, maxW - m.left - m.right);
+      const playH = Math.max(80, maxH - m.top - m.bottom);
+      const fit = Math.min(playW / totalW, playH / totalH);
+      const worldViewW = totalW * fit;
+      const worldViewH = totalH * fit;
+      const ox = m.left + (playW - worldViewW) / 2;
+      const oy = m.top + (playH - worldViewH) / 2;
+      const green: ScreenRect = {
+        minX: ox + (gb.minX + this.pad) * fit,
+        minY: oy + (gb.minY + this.pad) * fit,
+        maxX: ox + (gb.maxX + this.pad) * fit,
+        maxY: oy + (gb.maxY + this.pad) * fit,
+      };
+
+      // Headline must sit fully above the green AABB.
+      if (green.minY < m.top - 1) continue;
+
+      const plaque = placeChromeBox(maxW, maxH, green, PLAQUE_W, PLAQUE_H, [], [
+        'left',
+        'right',
+        'bottom',
+        'top-left',
+        'top-right',
+      ]);
+      if (!plaque) continue;
+      const wind = placeChromeBox(
+        maxW,
+        maxH,
+        green,
+        WIND_S,
+        WIND_S + 8,
+        [boxRect(plaque.x, plaque.y, plaque.w, plaque.h)],
+        ['right', 'left', 'top-right', 'top', 'bottom', 'bottom-right'],
+      );
+      if (!wind) continue;
+
+      if (fit > bestFit) {
+        bestFit = fit;
+        bestOx = ox;
+        bestOy = oy;
+        bestScale = fit;
+      }
+      // candidates are ordered least→most chrome; first max fit wins, but we
+      // keep scanning in case a later layout somehow fits larger (shouldn't).
+    }
+
+    if (bestFit < 0) {
+      // Fallback: slim top + bottom chrome so UI always has a home.
+      const m = { top: HEADLINE_H, bottom: Math.min(PLAQUE_H + GAP, maxH * 0.28), left: 0, right: 0 };
+      const playW = Math.max(80, maxW - m.left - m.right);
+      const playH = Math.max(80, maxH - m.top - m.bottom);
+      bestScale = Math.min(playW / totalW, playH / totalH);
+      const worldViewW = totalW * bestScale;
+      const worldViewH = totalH * bestScale;
+      bestOx = m.left + (playW - worldViewW) / 2;
+      bestOy = m.top + (playH - worldViewH) / 2;
+    }
+
+    this.scale = bestScale;
+    this.worldOx = bestOx;
+    this.worldOy = bestOy;
     this.offsetX = this.worldOx;
     this.offsetY = this.worldOy;
 
     this.ctx.setTransform(
-      this.dpr * fit,
+      this.dpr * bestScale,
       0,
       0,
-      this.dpr * fit,
-      this.dpr * (this.worldOx + fit * this.pad),
-      this.dpr * (this.worldOy + fit * this.pad),
+      this.dpr * bestScale,
+      this.dpr * (this.worldOx + bestScale * this.pad),
+      this.dpr * (this.worldOy + bestScale * this.pad),
     );
   }
 
@@ -272,7 +349,7 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Screen-space chrome: big theme headline, wind meter, plaque leaderboard.
+    // Screen-space chrome: compact headline, wind meter, plaque — never on the green.
     // Sized in CSS pixels so they stay readable while the fairway dominates.
     this.beginScreenSpace();
     const gb = polyBounds(green);
@@ -280,8 +357,22 @@ export class Renderer {
     const g1 = this.worldToScreen(gb.maxX, gb.maxY);
     const greenScreen = { minX: g0.x, minY: g0.y, maxX: g1.x, maxY: g1.y };
     drawThemeHeadline(ctx, hole, theme, this.viewW, this.viewH, greenScreen);
-    drawWindKeyScreen(ctx, hole, this.viewW, this.viewH, greenScreen);
-    drawHolePlaqueScreen(ctx, hole, this.viewW, this.viewH, greenScreen, holeScores);
+    const plaqueRect = drawHolePlaqueScreen(
+      ctx,
+      hole,
+      this.viewW,
+      this.viewH,
+      greenScreen,
+      holeScores,
+    );
+    drawWindKeyScreen(
+      ctx,
+      hole,
+      this.viewW,
+      this.viewH,
+      greenScreen,
+      plaqueRect ? [plaqueRect] : [],
+    );
     this.endScreenSpace();
 
     // Re-arm world transform for any late callers / next frame consistency.
@@ -466,6 +557,104 @@ function polyBounds(green: Vec2[]): { minX: number; minY: number; maxX: number; 
     maxY = Math.max(maxY, p.y);
   }
   return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+}
+
+type ScreenRect = { minX: number; minY: number; maxX: number; maxY: number };
+
+function boxRect(x: number, y: number, w: number, h: number): ScreenRect {
+  return { minX: x, minY: y, maxX: x + w, maxY: y + h };
+}
+
+function rectsOverlap(a: ScreenRect, b: ScreenRect, pad = 0): boolean {
+  return !(
+    a.maxX + pad <= b.minX ||
+    b.maxX + pad <= a.minX ||
+    a.maxY + pad <= b.minY ||
+    b.maxY + pad <= a.minY
+  );
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * Place a w×h chrome box fully outside the green AABB (and optional avoid
+ * rects). Returns null if it cannot fit without covering the fairway.
+ */
+function placeChromeBox(
+  viewW: number,
+  viewH: number,
+  green: ScreenRect,
+  boxW: number,
+  boxH: number,
+  avoid: ScreenRect[] = [],
+  prefer: Array<
+    'left' | 'right' | 'bottom' | 'top' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  > = ['left', 'right', 'bottom', 'top'],
+): { x: number; y: number; w: number; h: number } | null {
+  const margin = 6;
+  const gap = 6;
+  if (boxW > viewW - margin * 2 || boxH > viewH - margin * 2) return null;
+
+  const leftPocket = green.minX;
+  const rightPocket = viewW - green.maxX;
+  const topPocket = green.minY;
+  const bottomPocket = viewH - green.maxY;
+
+  const candidates: { x: number; y: number }[] = [];
+  const push = (x: number, y: number) => {
+    candidates.push({
+      x: clamp(x, margin, viewW - boxW - margin),
+      y: clamp(y, margin, viewH - boxH - margin),
+    });
+  };
+
+  for (const p of prefer) {
+    if (p === 'left' && leftPocket >= boxW + gap + margin) {
+      const x = Math.max(margin, (leftPocket - boxW) / 2);
+      push(x, green.minY);
+      push(x, (green.minY + green.maxY) / 2 - boxH / 2);
+      push(x, green.maxY - boxH);
+    } else if (p === 'right' && rightPocket >= boxW + gap + margin) {
+      const x = green.maxX + Math.max(gap, (rightPocket - boxW) / 2);
+      push(x, green.minY);
+      push(x, (green.minY + green.maxY) / 2 - boxH / 2);
+      push(x, green.maxY - boxH);
+    } else if (p === 'bottom' && bottomPocket >= boxH + gap + margin) {
+      const y = green.maxY + Math.max(gap, (bottomPocket - boxH) / 2);
+      push((viewW - boxW) / 2, y);
+      push(margin, y);
+      push(viewW - boxW - margin, y);
+    } else if (p === 'top' && topPocket >= boxH + gap + margin) {
+      const y = Math.max(margin, (topPocket - boxH) / 2);
+      push((viewW - boxW) / 2, y);
+      push(margin, y);
+      push(viewW - boxW - margin, y);
+    } else if (p === 'top-left' && leftPocket >= boxW * 0.55 && topPocket >= boxH * 0.35) {
+      push(margin, margin);
+    } else if (p === 'top-right' && rightPocket >= boxW * 0.55 && topPocket >= boxH * 0.35) {
+      push(viewW - boxW - margin, margin);
+    } else if (p === 'bottom-left' && leftPocket >= boxW * 0.55 && bottomPocket >= boxH * 0.35) {
+      push(margin, viewH - boxH - margin);
+    } else if (p === 'bottom-right' && rightPocket >= boxW * 0.55 && bottomPocket >= boxH * 0.35) {
+      push(viewW - boxW - margin, viewH - boxH - margin);
+    }
+  }
+
+  // Also try literal reserved chrome bands (full-strip left/right/bottom/top).
+  push(margin, clamp(green.minY, margin, viewH - boxH - margin));
+  push(viewW - boxW - margin, clamp(green.minY, margin, viewH - boxH - margin));
+  push(clamp((viewW - boxW) / 2, margin, viewW - boxW - margin), viewH - boxH - margin);
+  push(clamp((viewW - boxW) / 2, margin, viewW - boxW - margin), margin);
+
+  for (const c of candidates) {
+    const r = boxRect(c.x, c.y, boxW, boxH);
+    if (rectsOverlap(r, green, gap)) continue;
+    if (avoid.some((a) => rectsOverlap(r, a, 4))) continue;
+    return { x: c.x, y: c.y, w: boxW, h: boxH };
+  }
+  return null;
 }
 
 function pointInPolyLocal(px: number, py: number, poly: Vec2[]): boolean {
@@ -791,9 +980,7 @@ function drawChevron(
   ctx.stroke();
 }
 
-type ScreenRect = { minX: number; minY: number; maxX: number; maxY: number };
-
-/** Big combined hole-title headline in CSS-pixel chrome (same copy as plaque). */
+/** Compact combined hole-title headline in CSS-pixel chrome (same copy as plaque). */
 function drawThemeHeadline(
   ctx: CanvasRenderingContext2D,
   hole: HoleDef,
@@ -804,49 +991,56 @@ function drawThemeHeadline(
 ): void {
   const label = hole.name.toUpperCase();
   const nowSec = performance.now() / 1000;
-  // Prefer the strip above the green; fall back to top of canvas.
-  const gapAbove = green.minY;
-  const y = gapAbove >= 48 ? Math.min(green.minY - 20, 42) : 30;
 
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // Bigger, bolder fit — leave room for flanking emblems.
-  const iconR = Math.round(Math.min(22, Math.max(14, viewW * 0.032)));
-  let size = Math.round(Math.min(48, Math.max(28, viewW * 0.072)));
+  // Compact but still “pop” — fairway keeps the pixels.
+  const iconR = Math.round(Math.min(14, Math.max(10, viewW * 0.02)));
+  let size = Math.round(Math.min(26, Math.max(15, viewW * 0.038)));
   ctx.font = `900 ${size}px system-ui,sans-serif`;
-  const maxText = viewW - 28 - (iconR * 2 + 28) * 2;
-  while (size > 18 && ctx.measureText(label).width > maxText) {
+  const maxText = Math.max(80, viewW - 24 - (iconR * 2 + 18) * 2);
+  while (size > 13 && ctx.measureText(label).width > maxText) {
     size -= 1;
     ctx.font = `900 ${size}px system-ui,sans-serif`;
   }
 
   const tw = ctx.measureText(label).width;
-  const padX = 22;
-  const boxW = tw + padX * 2 + (iconR * 2 + 14) * 2;
-  const boxH = Math.max(size + 18, iconR * 2 + 12);
+  const padX = 12;
+  let boxW = tw + padX * 2 + (iconR * 2 + 10) * 2;
+  let boxH = Math.max(size + 10, iconR * 2 + 6);
+  // Never cover the green — sit fully in the top chrome strip.
+  const maxBottom = green.minY - 6;
+  if (boxH > maxBottom - 4) {
+    boxH = Math.max(18, maxBottom - 4);
+    size = Math.min(size, Math.max(12, boxH - 10));
+    ctx.font = `900 ${size}px system-ui,sans-serif`;
+  }
+  const y = Math.max(boxH / 2 + 3, Math.min(maxBottom - boxH / 2, boxH / 2 + 4));
   const x = viewW / 2;
+  // If the plate would still nick the green, shrink width emblems away.
+  if (y + boxH / 2 > green.minY - 4) {
+    ctx.restore();
+    return;
+  }
 
-  // Soft plate with theme-tinted rim
-  ctx.fillStyle = 'rgba(0,0,0,0.52)';
-  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 10);
   ctx.fill();
   ctx.strokeStyle = theme.accent;
-  ctx.globalAlpha = 0.55 + Math.sin(nowSec * 2.4) * 0.12;
-  ctx.lineWidth = 2.5;
-  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
+  ctx.globalAlpha = 0.5 + Math.sin(nowSec * 2.4) * 0.1;
+  ctx.lineWidth = 1.75;
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 10);
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Flanking canvas emblems (theme / features)
   drawHoleTitleEmblem(ctx, hole, theme, x - tw / 2 - padX / 2 - iconR, y, iconR, nowSec);
   drawHoleTitleEmblem(ctx, hole, theme, x + tw / 2 + padX / 2 + iconR, y, iconR, nowSec);
 
-  // Animated shimmer / pulse glow behind the type
-  const pulse = 0.55 + Math.sin(nowSec * 3.1) * 0.25;
+  const pulse = 0.5 + Math.sin(nowSec * 3.1) * 0.2;
   ctx.shadowColor = theme.accent;
-  ctx.shadowBlur = 14 + pulse * 10;
+  ctx.shadowBlur = 8 + pulse * 6;
   ctx.shadowOffsetY = 0;
 
   const shimmer = (Math.sin(nowSec * 2.2) + 1) * 0.5;
@@ -856,19 +1050,17 @@ function drawThemeHeadline(
   grad.addColorStop(Math.min(0.92, 0.55 + shimmer * 0.3), theme.accent);
   grad.addColorStop(1, theme.trim);
   ctx.fillStyle = grad;
-  ctx.letterSpacing = '0.08em';
+  ctx.letterSpacing = '0.06em';
   ctx.font = `900 ${size}px system-ui,sans-serif`;
   ctx.fillText(label, x, y + 1);
   ctx.shadowBlur = 0;
 
-  // Dark edge for contrast on every theme
-  ctx.lineWidth = Math.max(1.75, size * 0.05);
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = Math.max(1.25, size * 0.045);
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
   ctx.strokeText(label, x, y + 1);
 
-  // Soft highlight stroke in trim
-  ctx.globalAlpha = 0.35 + shimmer * 0.25;
-  ctx.lineWidth = Math.max(1, size * 0.025);
+  ctx.globalAlpha = 0.3 + shimmer * 0.2;
+  ctx.lineWidth = Math.max(0.8, size * 0.02);
   ctx.strokeStyle = theme.trim;
   ctx.strokeText(label, x, y + 1);
   ctx.globalAlpha = 1;
@@ -1130,77 +1322,78 @@ function drawWindKeyScreen(
   viewW: number,
   viewH: number,
   green: ScreenRect,
-): void {
+  avoid: ScreenRect[] = [],
+): ScreenRect | null {
   const mph = hole.windMph ?? 0;
   const w = hole.wind ?? { x: 1, y: 0 };
   const ang = Math.atan2(w.y, w.x);
   const strength = Math.min(1, mph / WIND_MAX_MPH);
 
-  const boxW = Math.min(148, Math.max(120, viewW * 0.22));
-  const boxH = Math.min(148, Math.max(124, viewH * 0.16));
+  let boxW = Math.round(Math.min(96, Math.max(76, viewW * 0.14)));
+  let boxH = Math.round(boxW + 6);
 
-  // Prefer top-right pocket outside the green; else bottom-right; else clamp.
-  const rightPocket = viewW - green.maxX;
-  const topPocket = green.minY;
-  const bottomPocket = viewH - green.maxY;
-  let x: number;
-  let y: number;
-  if (rightPocket >= boxW + 12) {
-    x = green.maxX + rightPocket / 2;
-    y = Math.max(boxH / 2 + 8, Math.min(green.minY + boxH / 2 + 8, viewH - boxH / 2 - 8));
-  } else if (topPocket >= boxH + 10) {
-    x = Math.min(viewW - boxW / 2 - 10, Math.max(green.maxX - boxW / 2, viewW - boxW / 2 - 10));
-    y = topPocket / 2;
-  } else if (bottomPocket >= boxH + 10) {
-    x = Math.min(viewW - boxW / 2 - 10, viewW - boxW / 2 - 10);
-    y = green.maxY + bottomPocket / 2;
-  } else {
-    x = viewW - boxW / 2 - 10;
-    y = Math.max(boxH / 2 + 52, green.minY - 4); // below theme headline
-  }
-  x = Math.max(boxW / 2 + 6, Math.min(viewW - boxW / 2 - 6, x));
-  y = Math.max(boxH / 2 + 6, Math.min(viewH - boxH / 2 - 6, y));
+  let placed =
+    placeChromeBox(viewW, viewH, green, boxW, boxH, avoid, [
+      'right',
+      'left',
+      'top-right',
+      'top',
+      'bottom',
+      'bottom-right',
+    ]) ??
+    placeChromeBox(viewW, viewH, green, (boxW = Math.round(boxW * 0.88)), (boxH = Math.round(boxH * 0.88)), avoid, [
+      'right',
+      'left',
+      'top-right',
+      'bottom',
+    ]);
+  if (!placed) return null;
+
+  const x = placed.x + placed.w / 2;
+  const y = placed.y + placed.h / 2;
+  boxW = placed.w;
+  boxH = placed.h;
 
   ctx.save();
   ctx.fillStyle = 'rgba(4, 18, 40, 0.88)';
-  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 16);
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 12);
   ctx.fill();
   ctx.strokeStyle = mph < 0.5
     ? 'rgba(255,255,255,0.35)'
     : `rgba(140, 220, 255, ${0.55 + strength * 0.45})`;
-  ctx.lineWidth = 3;
-  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 16);
+  ctx.lineWidth = 2.25;
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 12);
   ctx.stroke();
 
   ctx.fillStyle = 'rgba(210, 235, 255, 0.98)';
-  ctx.font = '900 15px system-ui,sans-serif';
+  ctx.font = '900 11px system-ui,sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('WIND', x, y - boxH / 2 + 18);
+  ctx.fillText('WIND', x, y - boxH / 2 + 13);
 
-  const ringR = Math.min(boxW, boxH) * 0.22;
+  const ringR = Math.min(boxW, boxH) * 0.2;
   ctx.beginPath();
-  ctx.arc(x, y + 2, ringR + 4, 0, Math.PI * 2);
+  ctx.arc(x, y + 1, ringR + 3, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(180, 220, 255, 0.45)';
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   ctx.stroke();
 
   ctx.strokeStyle = 'rgba(200, 230, 255, 0.55)';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.75;
   for (let i = 0; i < 4; i++) {
     const a = (i * Math.PI) / 2;
     ctx.beginPath();
-    ctx.moveTo(x + Math.cos(a) * (ringR - 2), y + 2 + Math.sin(a) * (ringR - 2));
-    ctx.lineTo(x + Math.cos(a) * (ringR + 4), y + 2 + Math.sin(a) * (ringR + 4));
+    ctx.moveTo(x + Math.cos(a) * (ringR - 2), y + 1 + Math.sin(a) * (ringR - 2));
+    ctx.lineTo(x + Math.cos(a) * (ringR + 3), y + 1 + Math.sin(a) * (ringR + 3));
     ctx.stroke();
   }
 
-  ctx.translate(x, y + 2);
+  ctx.translate(x, y + 1);
   ctx.rotate(ang);
   const arrowAlpha = mph < 0.5 ? 0.4 : 0.85 + strength * 0.15;
   ctx.fillStyle = `rgba(190,235,255,${arrowAlpha})`;
   ctx.strokeStyle = 'rgba(10,30,55,0.85)';
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   const shaft = ringR * 0.85;
   ctx.beginPath();
   ctx.moveTo(-shaft, 0);
@@ -1217,13 +1410,15 @@ function drawWindKeyScreen(
 
   ctx.save();
   ctx.fillStyle = mph < 0.5 ? 'rgba(210,220,230,0.95)' : '#f0fbff';
-  ctx.font = '900 22px system-ui,sans-serif';
+  ctx.font = '900 14px system-ui,sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.5)';
-  ctx.shadowBlur = 4;
-  ctx.fillText(`${mph} mph`, x, y + boxH / 2 - 20);
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 3;
+  ctx.fillText(`${mph} mph`, x, y + boxH / 2 - 14);
   ctx.restore();
+
+  return boxRect(placed.x, placed.y, placed.w, placed.h);
 }
 
 
@@ -1893,8 +2088,8 @@ function shade(hex: string, amt: number): string {
 
 
 /**
- * Hole plaque + WORLD BEST in CSS pixels — large type, parked in the biggest
- * free pocket outside the putting green (left / right / bottom).
+ * Compact hole plaque + WORLD BEST in CSS pixels — always parked fully
+ * outside the putting green AABB so putts stay unobstructed.
  */
 function drawHolePlaqueScreen(
   ctx: CanvasRenderingContext2D,
@@ -1903,71 +2098,83 @@ function drawHolePlaqueScreen(
   viewH: number,
   green: ScreenRect,
   scores: LeaderboardEntry[] = [],
-): void {
-  const topN = Math.min(8, Math.max(scores.length, 0));
-  const leftPocket = green.minX;
-  const rightPocket = viewW - green.maxX;
-  const bottomPocket = viewH - green.maxY;
+  avoid: ScreenRect[] = [],
+): ScreenRect | null {
+  const topN = Math.min(5, Math.max(scores.length, 0));
+  let boxW = Math.round(Math.min(188, Math.max(148, viewW * 0.28)));
+  const headerH = 72;
+  const rowH = 18;
+  let showRows = topN;
+  let boxH = headerH + 28 + showRows * rowH + (showRows === 0 ? 18 : 10);
 
-  // Target a phone-readable plaque; shrink only if the free pocket is tight.
-  let boxW = Math.min(340, Math.max(250, viewW * 0.42));
-  const headerH = 132;
-  const rowH = 28;
-  const listH = 36 + topN * rowH + (topN === 0 ? 28 : 16);
-  let boxH = headerH + listH;
+  const trySizes: Array<{ w: number; h: number; rows: number }> = [
+    { w: boxW, h: boxH, rows: showRows },
+    {
+      w: Math.round(boxW * 0.92),
+      h: headerH + 28 + Math.min(3, topN) * rowH + 10,
+      rows: Math.min(3, topN),
+    },
+    {
+      w: Math.round(Math.min(boxW, 152)),
+      h: headerH + 28 + Math.min(2, topN) * rowH + 8,
+      rows: Math.min(2, topN),
+    },
+    {
+      w: Math.round(Math.min(boxW, 140)),
+      h: headerH + (topN === 0 ? 36 : 28 + rowH + 6),
+      rows: Math.min(1, topN),
+    },
+  ];
 
-  let x: number;
-  let y: number;
-  if (leftPocket >= boxW + 16) {
-    x = Math.max(10, (leftPocket - boxW) / 2);
-    y = Math.max(56, Math.min(green.minY + 12, viewH - boxH - 12));
-  } else if (rightPocket >= boxW + 16) {
-    x = green.maxX + Math.max(10, (rightPocket - boxW) / 2);
-    y = Math.max(56, Math.min(green.minY + 12, viewH - boxH - 12));
-  } else if (bottomPocket >= Math.min(boxH, 160) + 8) {
-    boxW = Math.min(viewW - 20, Math.max(boxW, viewW * 0.72));
-    boxH = Math.min(boxH, bottomPocket - 10);
-    x = (viewW - boxW) / 2;
-    y = green.maxY + Math.max(6, (bottomPocket - boxH) / 2);
-  } else {
-    // Narrow portrait: compact plaque in top-left, just under the headline.
-    boxW = Math.min(boxW, viewW * 0.55);
-    boxH = Math.min(boxH, viewH * 0.42);
-    x = 8;
-    y = 52;
+  let placed: { x: number; y: number; w: number; h: number } | null = null;
+  let maxRows = showRows;
+  const preferOrders: Array<
+    Array<'left' | 'right' | 'bottom' | 'top' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'>
+  > = [
+    ['left', 'right', 'bottom', 'top-left', 'top-right'],
+    ['bottom', 'left', 'right', 'top'],
+    ['left', 'right', 'bottom', 'top'],
+  ];
+
+  for (const sz of trySizes) {
+    for (const prefer of preferOrders) {
+      placed = placeChromeBox(viewW, viewH, green, sz.w, sz.h, avoid, prefer);
+      if (placed) {
+        boxW = placed.w;
+        boxH = placed.h;
+        maxRows = sz.rows;
+        break;
+      }
+    }
+    if (placed) break;
   }
+  if (!placed) return null;
 
-  // If the chosen pocket still clips, clamp and allow mild height shrink.
-  if (y + boxH > viewH - 6) {
-    boxH = Math.max(160, viewH - y - 6);
-  }
-  x = Math.max(6, Math.min(viewW - boxW - 6, x));
-  y = Math.max(6, Math.min(viewH - boxH - 6, y));
-
-  const maxRows = Math.max(0, Math.min(topN, Math.floor((boxH - headerH - 40) / rowH)));
+  const x = placed.x;
+  const y = placed.y;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  roundRect(ctx, x + 6, y + 8, boxW, boxH, 14);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(ctx, x + 4, y + 5, boxW, boxH, 10);
   ctx.fill();
 
   ctx.fillStyle = '#3b2519';
-  ctx.fillRect(x + boxW / 2 - 7, y + boxH - 2, 14, 28);
+  ctx.fillRect(x + boxW / 2 - 5, y + boxH - 2, 10, 18);
 
   const g = ctx.createLinearGradient(x, y, x, y + boxH);
   g.addColorStop(0, '#fff8e8');
   g.addColorStop(0.55, '#f4e4bd');
   g.addColorStop(1, '#dfc891');
   ctx.fillStyle = g;
-  roundRect(ctx, x, y, boxW, boxH, 14);
+  roundRect(ctx, x, y, boxW, boxH, 10);
   ctx.fill();
   ctx.strokeStyle = '#4d2c0d';
-  ctx.lineWidth = 5;
-  roundRect(ctx, x, y, boxW, boxH, 14);
+  ctx.lineWidth = 3.5;
+  roundRect(ctx, x, y, boxW, boxH, 10);
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-  ctx.lineWidth = 2.25;
-  roundRect(ctx, x + 7, y + 7, boxW - 14, boxH - 14, 10);
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, x + 5, y + 5, boxW - 10, boxH - 10, 7);
   ctx.stroke();
 
   const cx = x + boxW / 2;
@@ -1975,72 +2182,75 @@ function drawHolePlaqueScreen(
   ctx.textBaseline = 'middle';
 
   ctx.fillStyle = '#4a2605';
-  ctx.font = '900 26px system-ui,sans-serif';
-  ctx.fillText(`HOLE ${hole.id}`, cx, y + 30);
+  ctx.font = '900 15px system-ui,sans-serif';
+  ctx.fillText(`HOLE ${hole.id}`, cx, y + 16);
 
   const theme = THEMES[hole.theme] ?? THEMES.tropical;
-  let nameSize = 28;
+  let nameSize = 16;
   ctx.font = `900 ${nameSize}px system-ui,sans-serif`;
   const name = hole.name;
-  while (nameSize > 16 && ctx.measureText(name).width > boxW - 28) {
+  while (nameSize > 11 && ctx.measureText(name).width > boxW - 20) {
     nameSize -= 1;
     ctx.font = `900 ${nameSize}px system-ui,sans-serif`;
   }
   // Same combined title as the top headline — theme-accented for pop.
   ctx.shadowColor = theme.accent;
-  ctx.shadowBlur = 6;
-  const nameGrad = ctx.createLinearGradient(cx - 80, y + 50, cx + 80, y + 78);
+  ctx.shadowBlur = 4;
+  const nameGrad = ctx.createLinearGradient(cx - 60, y + 28, cx + 60, y + 46);
   nameGrad.addColorStop(0, '#1a1008');
   nameGrad.addColorStop(0.45, theme.accent);
   nameGrad.addColorStop(1, '#1a1008');
   ctx.fillStyle = nameGrad;
-  ctx.fillText(name, cx, y + 64);
+  ctx.fillText(name, cx, y + 36);
   ctx.shadowBlur = 0;
-  ctx.lineWidth = 1.25;
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.strokeText(name, cx, y + 64);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.strokeText(name, cx, y + 36);
 
-  ctx.font = '800 20px system-ui,sans-serif';
+  ctx.font = '800 12px system-ui,sans-serif';
   ctx.fillStyle = '#2f1b08';
-  ctx.fillText(`Par ${hole.par}  ·  ${hole.lengthFeet} ft`, cx, y + 98);
+  ctx.fillText(`Par ${hole.par}  ·  ${hole.lengthFeet} ft`, cx, y + 54);
 
-  ctx.strokeStyle = 'rgba(73, 42, 13, 0.45)';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(73, 42, 13, 0.4)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(x + 18, y + headerH - 8);
-  ctx.lineTo(x + boxW - 18, y + headerH - 8);
+  ctx.moveTo(x + 12, y + headerH - 10);
+  ctx.lineTo(x + boxW - 12, y + headerH - 10);
   ctx.stroke();
 
-  ctx.font = '900 20px system-ui,sans-serif';
+  ctx.font = '900 12px system-ui,sans-serif';
   ctx.fillStyle = '#4b2b08';
-  ctx.fillText('WORLD BEST', cx, y + headerH + 16);
+  ctx.fillText('WORLD BEST', cx, y + headerH + 8);
 
-  const listTop = y + headerH + 42;
-  if (maxRows === 0 && topN === 0) {
-    ctx.font = '700 18px system-ui,sans-serif';
+  const listTop = y + headerH + 26;
+  const rowsFit = Math.max(0, Math.min(maxRows, Math.floor((boxH - headerH - 28) / rowH)));
+  if (rowsFit === 0 && topN === 0) {
+    ctx.font = '700 11px system-ui,sans-serif';
     ctx.fillStyle = '#5b4529';
-    ctx.fillText('No scores yet — sink it!', cx, listTop + 6);
+    ctx.fillText('No scores yet — sink it!', cx, listTop);
   } else {
-    for (let i = 0; i < maxRows; i++) {
+    for (let i = 0; i < rowsFit; i++) {
       const e = scores[i]!;
       const rowY = listTop + i * rowH;
-      ctx.font = '800 18px system-ui,sans-serif';
+      ctx.font = '800 12px system-ui,sans-serif';
       ctx.fillStyle = i === 0 ? '#744700' : '#4a321d';
       ctx.textAlign = 'left';
-      ctx.fillText(String(e.rank), x + 18, rowY);
-      const nm = e.name.length > 14 ? e.name.slice(0, 13) + '…' : e.name;
-      ctx.font = '700 18px system-ui,sans-serif';
+      ctx.fillText(String(e.rank), x + 12, rowY);
+      const nm = e.name.length > 12 ? e.name.slice(0, 11) + '…' : e.name;
+      ctx.font = '700 12px system-ui,sans-serif';
       ctx.fillStyle = '#120d06';
-      ctx.fillText(nm, x + 52, rowY);
+      ctx.fillText(nm, x + 36, rowY);
       ctx.textAlign = 'right';
-      ctx.font = '900 20px system-ui,sans-serif';
+      ctx.font = '900 13px system-ui,sans-serif';
       ctx.fillStyle = '#231305';
-      ctx.fillText(String(e.score), x + boxW - 18, rowY);
+      ctx.fillText(String(e.score), x + boxW - 12, rowY);
     }
   }
 
   ctx.restore();
+  return boxRect(x, y, boxW, boxH);
 }
+
 
 function drawGolfBall(
   ctx: CanvasRenderingContext2D,
