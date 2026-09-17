@@ -29,7 +29,9 @@ body {
   overflow: hidden;
   background: radial-gradient(ellipse at top, #145c45 0%, var(--bg) 55%, #06281e 100%);
   color: var(--text);
-  touch-action: none;
+  /* Menu and overlays need to receive vertical touch scrolling. Gameplay
+     opts back into touch-action: none below so putt gestures stay locked. */
+  touch-action: pan-y;
   user-select: none;
 }
 
@@ -55,6 +57,30 @@ body {
 
 .screen.hidden {
   display: none;
+}
+
+/* The menu and lobby can be taller than a phone viewport. Keep the page
+   itself locked while letting these screens own their vertical scroll. */
+#menu-screen,
+#lobby-screen {
+  justify-content: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  padding: max(20px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+}
+
+#menu-screen > *,
+#lobby-screen > * {
+  flex: 0 0 auto;
+}
+
+#menu-screen .card {
+  width: min(440px, 100%);
 }
 
 .logo {
@@ -170,6 +196,8 @@ label {
 #game-screen {
   padding: 0;
   justify-content: flex-start;
+  overflow: hidden;
+  touch-action: none;
   align-items: stretch;
   background: transparent;
 }
@@ -335,10 +363,21 @@ label {
   inset: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   background: rgba(0, 20, 14, 0.72);
   z-index: 15;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.overlay-card > .card {
+  flex: 0 0 auto;
+  margin-block: auto;
 }
 
 .overlay-card.hidden {
