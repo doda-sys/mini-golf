@@ -12,7 +12,7 @@ export const CUP_SINK_SPEED = 2.8;
 /** Frames of residence (at ~60Hz sim scale) needed to sink while center is deep in cup. */
 export const CUP_RESIDENCE_FRAMES = 8;
 /** Capture damping when ball center is inside the cup (energy-safe). */
-export const CUP_DAMP = 0.82;
+export const CUP_DAMP = 0.78;
 /** Max fraction of cup radius for "deep" residence capture. */
 export const CUP_DEEP_FRAC = 0.9;
 /**
@@ -24,12 +24,16 @@ export const WIND_ALONG = 0.0045;
 /** Speed (px/frame-ish) at which wind reaches full strength. Weaker near stop. */
 export const WIND_SPEED_REF = 7.5;
 /**
- * Downhill accel scale for topo gradient.
- * Tuned so meaningful break dominates wind on typical putts.
+ * Gravity-style scale for topo break: a ≈ SLOPE_G * (−∇h · L).
+ * Tuned so medium putts break/speed-up/slow-down obviously; stronger than wind.
  */
-export const SLOPE_ACCEL = 0.125;
-/** Max downhill gradient magnitude applied per sample (world). */
-export const SLOPE_GRAD_CAP = 0.085;
+export const SLOPE_G = 0.145;
+/** Cap on scaled downhill magnitude (after ·L). Keeps extreme bumps playable. */
+export const SLOPE_GRAD_CAP = 0.9;
+/** Radius multiplier around cup where slope force is faded so cups still capture. */
+export const CUP_SLOPE_FADE = 2.4;
+/** Legacy alias — some UI may reference SLOPE_ACCEL. */
+export const SLOPE_ACCEL = SLOPE_G;
 
 export type BallState = {
   pos: Vec2;
@@ -405,22 +409,34 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
     const flying = (ball.airborne ?? 0) > 0;
 
     // Green break from height field (same field as the Green Map overlay).
-    // Stronger than wind; skipped while airborne.
+    // force ≈ −g · ∇h (via sampleDownhill which returns −∇h·L). Stronger than wind.
+    // Skipped while airborne. Faded near the cup so slope cannot spit balls out.
+    let slopePull = 0;
     if (!flying && hole.topo) {
       const bounds = polyBounds(green);
       const downhill = sampleDownhill(hole.topo, ball.pos.x, ball.pos.y, bounds);
       const dm = Math.hypot(downhill.x, downhill.y);
       if (dm > 1e-8) {
         const capped = Math.min(dm, SLOPE_GRAD_CAP);
-        const sx = (downhill.x / dm) * capped;
-        const sy = (downhill.y / dm) * capped;
+        let sx = (downhill.x / dm) * capped;
+        let sy = (downhill.y / dm) * capped;
+        const toCup = dist(ball.pos, hole.cup);
+        const fadeR = hole.cupRadius * CUP_SLOPE_FADE;
+        if (toCup < fadeR) {
+          // Quadratic fade → 0 at cup center (capture stays fair on sloped greens)
+          const fade = (toCup / fadeR) * (toCup / fadeR);
+          sx *= fade;
+          sy *= fade;
+        }
+        slopePull = Math.hypot(sx, sy) * SLOPE_G;
         ball.vel = {
-          x: ball.vel.x + sx * SLOPE_ACCEL * h * 60,
-          y: ball.vel.y + sy * SLOPE_ACCEL * h * 60,
+          x: ball.vel.x + sx * SLOPE_G * h * 60,
+          y: ball.vel.y + sy * SLOPE_G * h * 60,
         };
       }
     } else if (!flying && hole.slope && (hole.slope.x !== 0 || hole.slope.y !== 0)) {
-      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_ACCEL * 0.55 * h * 60));
+      slopePull = len(hole.slope) * SLOPE_G * 0.55;
+      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_G * 0.55 * h * 60));
     }
 
     // Wind secondary to topo; none while airborne.
@@ -503,7 +519,13 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
     if (applyCupCapture(ball, hole)) return;
 
     const speed = len(ball.vel);
-    if (speed < MIN_SPEED && (ball.airborne ?? 0) <= 0) {
+    // Only freeze when nearly stopped AND slope cannot keep the ball rolling downhill.
+    // A ball released with tiny velocity on a slope must accelerate down the fall line.
+    if (
+      speed < MIN_SPEED &&
+      (ball.airborne ?? 0) <= 0 &&
+      slopePull < MIN_SPEED * 0.35
+    ) {
       ball.vel = { x: 0, y: 0 };
     }
   }

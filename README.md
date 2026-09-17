@@ -2,7 +2,7 @@
 
 Browser-based top-down miniature golf — solo offline play or real-time multiplayer with short room codes. Built with **Vite + TypeScript + HTML Canvas** and **Trystero** (BitTorrent tracker signaling) for peer-to-peer sync. No accounts, no paid backend.
 
-Each round plays a fixed **championship course of 9 curated holes** (2× Par 3 · 5× Par 4 · 2× Par 5) with large geometric fairways, ramps/jumps, windmills, a volcano, real green slopes, and wind.
+Each round plays a fixed **championship course of 9 curated holes** (2× Par 3 · 5× Par 4 · 2× Par 5) with large geometric fairways, ramps/jumps, windmills, a volcano, **real green slopes** (speed up / slow down / break), and wind.
 
 ## Championship nine
 
@@ -18,7 +18,7 @@ Each round plays a fixed **championship course of 9 curated holes** (2× Par 3 �
 | 8 | Volcano Vista | 4 | **Volcano** + lava hazard |
 | 9 | Fooze Finale | 5 | Spectacle finale + **shortcut** ramp + windmill |
 
-Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has real topo break; **slope dominates wind**.
+Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent height field; **slope dominates wind**. Boards are roomy (~1.5× prior footprint) for phone-filling putts.
 
 ## How to play
 
@@ -27,7 +27,7 @@ Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has real topo 
 3. Avoid **walls**, bounce off **bumpers**, slog through **sand**, slide on **ice**, and don’t splash in **water/lava** (resets to tee +1).
 4. Hit **ramps** with enough speed/aim to jump gaps — failed landings splash or reset fairly.
 5. Watch the large on-course **WIND** key (compass + **0–25 mph**) — secondary to green break.
-6. Toggle **Green Map / Topo** for contour lines, downhill arrows, and a steepness heatmap (same height field as physics).
+6. Toggle **Green Map / Topo** for StrackaLine-style contours, downhill ticks, and elevation heatmap (**same height field as physics**).
 7. Read the **hole plaque** (outside the green): number, name, par, length in feet.
 8. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
 
@@ -63,10 +63,10 @@ Live URL: https://doda-sys.github.io/mini-golf/
 
 | Piece | Role |
 |--------|------|
-| `src/physics/world.ts` | Walls, bumpers, hazards, cup, wind, topo break, ramps, windmill blades |
-| `src/levels/course.ts` | Curated championship 9 |
-| `src/levels/topo.ts` | Height field (map + physics) |
+| `src/physics/world.ts` | Walls, bumpers, hazards, cup, wind, topo break (−g∇h), ramps, windmill blades |
+| `src/levels/course.ts` | Curated championship 9 (large fairways) |
+| `src/levels/topo.ts` | Height field (map + physics, char-length scaled) |
 | `src/levels/themes.ts` | Themed surrounds |
-| `src/game/renderer.ts` | Canvas, plaque, wind key, green map, props |
+| `src/game/renderer.ts` | Canvas, plaque, wind key, green-book map, props |
 | `src/net/peer.ts` | Trystero P2P |
 | `src/main.ts` | UI + game loop |

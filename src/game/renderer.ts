@@ -474,109 +474,209 @@ function drawSlopeCues(
 }
 
 /**
- * Full green-book / PuttView-style overlay from the same height field as physics.
- * Heatmap by steepness, contour lines of equal elevation, downhill arrows.
+ * StrackaLine / green-book overlay from the SAME height field as physics.
+ * Soft elevation heatmap (cool=low, warm=high), neat contour isolines,
+ * small downhill tick-arrows. Low opacity so carpet still reads.
  */
 function drawGreenMapOverlay(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
   const topo = hole.topo;
   if (!topo) return;
   const bounds = topoBounds(green);
   const { minX, minY, maxX, maxY } = bounds;
-  const step = 14;
+  const gw = maxX - minX || 1;
+  const gh = maxY - minY || 1;
+  // Finer sample grid for smooth professional look
+  const step = Math.max(8, Math.min(12, Math.round(Math.min(gw, gh) / 48)));
 
-  // Sample steepness range for color scale
-  let maxSteep = 0.001;
-  const samples: { x: number; y: number; steep: number; h: number }[] = [];
-  for (let y = minY; y <= maxY; y += step) {
-    for (let x = minX; x <= maxX; x += step) {
-      if (!pointInPolyLocal(x, y, green)) continue;
-      const steep = sampleSteepness(topo, x, y, bounds);
-      const h = sampleHeight(topo, x, y, bounds);
-      samples.push({ x, y, steep, h });
-      if (steep > maxSteep) maxSteep = steep;
-    }
-  }
-
-  ctx.save();
-  // Heatmap tiles: cool blue (flat) → warm red (steep)
-  for (const s of samples) {
-    const t = Math.min(1, s.steep / maxSteep);
-    const r = Math.round(40 + t * 200);
-    const g = Math.round(120 + (1 - Math.abs(t - 0.45) * 2) * 80);
-    const b = Math.round(220 - t * 180);
-    ctx.fillStyle = `rgba(${r},${g},${b},${0.22 + t * 0.28})`;
-    ctx.fillRect(s.x - step / 2, s.y - step / 2, step, step);
-  }
-
-  // Contour lines — march heights
   let minH = Infinity;
   let maxH = -Infinity;
-  for (const s of samples) {
-    minH = Math.min(minH, s.h);
-    maxH = Math.max(maxH, s.h);
+  let maxSteep = 0.001;
+  const cols = Math.floor(gw / step) + 1;
+  const rows = Math.floor(gh / step) + 1;
+  // Sparse sample list for heatmap + range
+  type Cell = { x: number; y: number; h: number; steep: number; inside: boolean };
+  const grid: Cell[] = [];
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const x = minX + i * step;
+      const y = minY + j * step;
+      const inside = pointInPolyLocal(x, y, green);
+      const h = inside ? sampleHeight(topo, x, y, bounds) : 0;
+      const steep = inside ? sampleSteepness(topo, x, y, bounds) : 0;
+      grid.push({ x, y, h, steep, inside });
+      if (inside) {
+        minH = Math.min(minH, h);
+        maxH = Math.max(maxH, h);
+        maxSteep = Math.max(maxSteep, steep);
+      }
+    }
   }
-  const levels = 7;
-  ctx.lineWidth = 1.35;
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-  ctx.setLineDash([]);
-  for (let li = 1; li < levels; li++) {
-    const level = minH + ((maxH - minH) * li) / levels;
+  if (!(maxH > minH)) {
+    maxH = minH + 1;
+  }
+  const hRange = maxH - minH;
+
+  ctx.save();
+
+  // --- Soft elevation heatmap (cool low → warm high), low opacity ---
+  for (const c of grid) {
+    if (!c.inside) continue;
+    const t = (c.h - minH) / hRange; // 0 low … 1 high
+    // Professional blue→teal→amber→rose (not toy neon)
+    const r = Math.round(70 + t * 160);
+    const gCol = Math.round(130 + Math.sin(t * Math.PI) * 40 - t * 30);
+    const b = Math.round(200 - t * 150);
+    const a = 0.1 + t * 0.16; // carpet still reads
+    ctx.fillStyle = `rgba(${r},${gCol},${b},${a})`;
+    ctx.fillRect(c.x - step / 2, c.y - step / 2, step + 0.5, step + 0.5);
+  }
+
+  // Subtle steepness wash on top (warmer where break is strong)
+  for (const c of grid) {
+    if (!c.inside) continue;
+    const s = Math.min(1, c.steep / maxSteep);
+    if (s < 0.15) continue;
+    ctx.fillStyle = `rgba(210, 90, 40, ${0.04 + s * 0.1})`;
+    ctx.fillRect(c.x - step / 2, c.y - step / 2, step + 0.5, step + 0.5);
+  }
+
+  // --- Contour isolines (marching squares) at consistent elevation intervals ---
+  const nLevels = Math.max(5, Math.min(9, Math.round(hRange / 0.12) + 3));
+  const interval = hRange / nLevels;
+
+  // Marching-squares contour segments
+  for (let li = 1; li < nLevels; li++) {
+    const level = minH + interval * li;
+    const major = li % 2 === 0;
     ctx.beginPath();
-    let drawing = false;
-    // Horizontal scan for iso crossings (simple)
-    for (let y = minY; y <= maxY; y += step) {
-      for (let x = minX; x <= maxX - step; x += step) {
-        if (!pointInPolyLocal(x, y, green) || !pointInPolyLocal(x + step, y, green)) {
-          drawing = false;
-          continue;
-        }
-        const h0 = sampleHeight(topo, x, y, bounds);
-        const h1 = sampleHeight(topo, x + step, y, bounds);
-        if ((h0 - level) * (h1 - level) <= 0) {
-          const t = Math.abs(h1 - h0) < 1e-9 ? 0.5 : (level - h0) / (h1 - h0);
-          const cx = x + t * step;
-          if (!drawing) {
-            ctx.moveTo(cx, y);
-            drawing = true;
-          } else {
-            ctx.lineTo(cx, y);
-          }
-        } else {
-          drawing = false;
+    for (let j = 0; j < rows - 1; j++) {
+      for (let i = 0; i < cols - 1; i++) {
+        const a = grid[j * cols + i];
+        const b = grid[j * cols + i + 1];
+        const c = grid[(j + 1) * cols + i + 1];
+        const d = grid[(j + 1) * cols + i];
+        if (!a.inside || !b.inside || !c.inside || !d.inside) continue;
+        const corners = [a, b, c, d];
+        const above = corners.map((p) => (p.h >= level ? 1 : 0));
+        const code = above[0] | (above[1] << 1) | (above[2] << 2) | (above[3] << 3);
+        if (code === 0 || code === 15) continue;
+        const lerpEdge = (
+          p0: Cell,
+          p1: Cell,
+        ): { x: number; y: number } => {
+          const t = Math.abs(p1.h - p0.h) < 1e-9 ? 0.5 : (level - p0.h) / (p1.h - p0.h);
+          return { x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t };
+        };
+        const top = lerpEdge(a, b);
+        const right = lerpEdge(b, c);
+        const bottom = lerpEdge(d, c);
+        const left = lerpEdge(a, d);
+        const seg = (p: { x: number; y: number }, q: { x: number; y: number }) => {
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(q.x, q.y);
+        };
+        // Standard MS cases (incl. simple saddles)
+        switch (code) {
+          case 1:
+          case 14:
+            seg(left, top);
+            break;
+          case 2:
+          case 13:
+            seg(top, right);
+            break;
+          case 3:
+          case 12:
+            seg(left, right);
+            break;
+          case 4:
+          case 11:
+            seg(right, bottom);
+            break;
+          case 6:
+          case 9:
+            seg(top, bottom);
+            break;
+          case 7:
+          case 8:
+            seg(left, bottom);
+            break;
+          case 5:
+            seg(left, top);
+            seg(right, bottom);
+            break;
+          case 10:
+            seg(top, right);
+            seg(left, bottom);
+            break;
+          default:
+            break;
         }
       }
-      drawing = false;
     }
+    ctx.strokeStyle = major ? 'rgba(255,255,255,0.5)' : 'rgba(250,250,245,0.32)';
+    ctx.lineWidth = major ? 1.2 : 0.8;
     ctx.stroke();
   }
 
-  // Slope arrows pointing downhill on a coarse grid
-  const aStep = step * 2.2;
-  for (let y = minY + aStep / 2; y <= maxY; y += aStep) {
-    for (let x = minX + aStep / 2; x <= maxX; x += aStep) {
+  // --- Small neat downhill ticks (not cheesy chevrons) ---
+  const aStep = step * 3.2;
+  for (let y = minY + aStep * 0.5; y <= maxY; y += aStep) {
+    for (let x = minX + aStep * 0.5; x <= maxX; x += aStep) {
       if (!pointInPolyLocal(x, y, green)) continue;
       const d = sampleDownhill(topo, x, y, bounds);
       const dm = Math.hypot(d.x, d.y);
-      if (dm < 1e-5) continue;
+      if (dm < 0.08) continue;
       const dx = d.x / dm;
       const dy = d.y / dm;
-      const size = 5 + Math.min(1, dm / maxSteep) * 7;
-      ctx.strokeStyle = 'rgba(255, 236, 150, 0.85)';
-      ctx.fillStyle = 'rgba(255, 200, 80, 0.35)';
-      ctx.lineWidth = 1.6;
-      drawChevron(ctx, x, y, dx, dy, size);
+      const tickLen = 5 + Math.min(1, dm / maxSteep) * 5;
+      // shaft
+      ctx.strokeStyle = 'rgba(30, 40, 55, 0.55)';
+      ctx.lineWidth = 1.05;
+      ctx.beginPath();
+      ctx.moveTo(x - dx * tickLen * 0.35, y - dy * tickLen * 0.35);
+      ctx.lineTo(x + dx * tickLen * 0.65, y + dy * tickLen * 0.65);
+      ctx.stroke();
+      // tiny arrowhead
+      const px = -dy;
+      const py = dx;
+      const tipX = x + dx * tickLen * 0.65;
+      const tipY = y + dy * tickLen * 0.65;
+      const ah = 2.6 + Math.min(1, dm / maxSteep);
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX - dx * ah + px * ah * 0.7, tipY - dy * ah + py * ah * 0.7);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX - dx * ah - px * ah * 0.7, tipY - dy * ah - py * ah * 0.7);
+      ctx.stroke();
     }
   }
 
-  // Legend chip
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  roundRect(ctx, minX + 6, maxY - 28, 118, 22, 6);
+  // Compact legend
+  const lx = minX + 8;
+  const ly = maxY - 36;
+  ctx.fillStyle = 'rgba(12, 20, 32, 0.55)';
+  roundRect(ctx, lx, ly, 132, 30, 6);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.font = 'bold 11px system-ui,sans-serif';
+  // mini gradient bar
+  for (let i = 0; i < 40; i++) {
+    const t = i / 39;
+    const r = Math.round(70 + t * 160);
+    const gCol = Math.round(130 + Math.sin(t * Math.PI) * 40 - t * 30);
+    const b = Math.round(200 - t * 150);
+    ctx.fillStyle = `rgba(${r},${gCol},${b},0.85)`;
+    ctx.fillRect(lx + 8 + i * 1.15, ly + 7, 1.3, 8);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.font = '600 9px system-ui,sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('TOPO · flat→steep', minX + 14, maxY - 17);
+  ctx.fillText('low', lx + 8, ly + 22);
+  ctx.textAlign = 'right';
+  ctx.fillText('high', lx + 54, ly + 22);
+  ctx.textAlign = 'left';
+  ctx.fillText('· contours · break', lx + 62, ly + 15);
+
   ctx.restore();
 }
 

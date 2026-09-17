@@ -1,6 +1,6 @@
 /**
  * Fooze n Froops — curated 9-hole championship course.
- * Fixed order for solo + multiplayer. Templates stay expandable later.
+ * Fixed order for solo + multiplayer. Large geometric fairways + real green topo.
  */
 import type {
   Bumper,
@@ -66,7 +66,7 @@ function pathLen(pts: Vec2[]): number {
 }
 
 function feetFromPath(tee: Vec2, via: Vec2[], cup: Vec2): number {
-  return Math.max(18, Math.round(pathLen([tee, ...via, cup]) * PX_TO_FEET));
+  return Math.max(22, Math.round(pathLen([tee, ...via, cup]) * PX_TO_FEET));
 }
 
 function topo(
@@ -75,12 +75,7 @@ function topo(
   strength: number,
   bumps: GreenTopo['bumps'] = [],
 ): GreenTopo {
-  return {
-    tiltX,
-    tiltY,
-    strength,
-    bumps,
-  };
+  return { tiltX, tiltY, strength, bumps };
 }
 
 function slopeFromTopo(t: GreenTopo): Vec2 {
@@ -88,7 +83,7 @@ function slopeFromTopo(t: GreenTopo): Vec2 {
   const dy = -t.tiltY * t.strength;
   const mag = Math.hypot(dx, dy);
   if (mag < 1e-6) return { x: 0, y: 0 };
-  const scale = Math.min(1.25, mag * 1.6);
+  const scale = Math.min(1.35, mag * 1.5);
   return {
     x: Math.round((dx / mag) * scale * 1000) / 1000,
     y: Math.round((dy / mag) * scale * 1000) / 1000,
@@ -107,7 +102,7 @@ function wind(deg: number, mph: number): { wind: Vec2; windMph: number } {
 }
 
 /** Vertical corridor with tee/cup pads. */
-function vertLane(cx: number, teeY: number, cupY: number, hw: number, end = 28): Vec2[] {
+function vertLane(cx: number, teeY: number, cupY: number, hw: number, end = 36): Vec2[] {
   const bot = Math.max(teeY, cupY) + end;
   const top = Math.min(teeY, cupY) - end;
   return [
@@ -126,7 +121,7 @@ function lDogleg(
   cornerY: number,
   cupY: number,
   hw: number,
-  end = 26,
+  end = 34,
 ): Vec2[] {
   const teeBot = teeY + end;
   const cupTop = cupY - end;
@@ -164,7 +159,7 @@ function islandBridge(
   islandHw: number,
   neck0: number,
   neck1: number,
-  end = 28,
+  end = 36,
 ): Vec2[] {
   const teeBot = teeY + end;
   const cupTop = cupY - end;
@@ -193,7 +188,7 @@ function zChannel(
   yB: number,
   cupY: number,
   hw: number,
-  end = 26,
+  end = 34,
 ): Vec2[] {
   const teeBot = teeY + end;
   const cupTop = cupY - end;
@@ -213,7 +208,7 @@ function zChannel(
   ];
 }
 
-function finish( partial: {
+function finish(partial: {
   id: number;
   name: string;
   par: number;
@@ -264,24 +259,23 @@ function finish( partial: {
   };
 }
 
-// ─── Hole 1 — Par 3 opener ───────────────────────────────────────────────────
+// ─── Hole 1 — Par 3 opener (was 520×780 / hw 92 → roomier) ───────────────────
 function hole1(): HoleDef {
-  const W = 520;
-  const H = 780;
+  const W = 780;
+  const H = 1180;
   const cx = W / 2;
-  const teeY = H - 90;
-  const cupY = 90;
-  const hw = 92;
+  const teeY = H - 120;
+  const cupY = 120;
+  const hw = 148;
   const green = vertLane(cx, teeY, cupY, hw);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx + 22, y: cupY };
-  // Center gate with side gap — not a free HIO
+  const cup = { x: cx + 36, y: cupY };
   const gateY = H * 0.48;
-  const gap = 48;
-  const gapC = cx + 28;
+  const gap = 72;
+  const gapC = cx + 42;
   const walls = [
-    wall(cx - hw + 10, gateY - 11, Math.max(24, gapC - gap / 2 - (cx - hw + 10)), 22),
-    wall(gapC + gap / 2, gateY - 11, Math.max(24, cx + hw - 10 - (gapC + gap / 2)), 22),
+    wall(cx - hw + 14, gateY - 14, Math.max(32, gapC - gap / 2 - (cx - hw + 14)), 28),
+    wall(gapC + gap / 2, gateY - 14, Math.max(32, cx + hw - 14 - (gapC + gap / 2)), 28),
   ];
   return finish({
     id: 1,
@@ -293,13 +287,15 @@ function hole1(): HoleDef {
     tee,
     cup,
     walls,
-    bumpers: [{ x: cx - 30, y: gateY - 70, r: 16 }],
+    bumpers: [{ x: cx - 48, y: gateY - 110, r: 20 }],
     theme: 'tropical',
     windDeg: -40,
     windMph: 6,
-    topo: topo(0.35, -0.55, 0.72, [
-      { x: 0.55, y: 0.35, amp: 0.4, rx: 0.22, ry: 0.18 },
-      { x: 0.35, y: 0.65, amp: -0.3, rx: 0.2, ry: 0.2 },
+    // Strong right-to-left + downhill toward cup — obvious break
+    topo: topo(0.55, -0.78, 1.0, [
+      { x: 0.62, y: 0.32, amp: 0.55, rx: 0.26, ry: 0.2 },
+      { x: 0.32, y: 0.68, amp: -0.42, rx: 0.22, ry: 0.22 },
+      { x: 0.5, y: 0.5, amp: 0.28, rx: 0.18, ry: 0.28 },
     ]),
     features: ['opener', 'gate'],
   });
@@ -307,27 +303,22 @@ function hole1(): HoleDef {
 
 // ─── Hole 2 — Par 4 dogleg risk/reward shortcut ──────────────────────────────
 function hole2(): HoleDef {
-  const W = 640;
-  const H = 900;
-  const stemX = 180;
-  const cupX = 460;
-  const teeY = H - 90;
+  const W = 980;
+  const H = 1360;
+  const stemX = 260;
+  const cupX = 720;
+  const teeY = H - 120;
   const cornerY = H * 0.42;
-  const cupY = 90;
-  const hw = 78;
+  const cupY = 120;
+  const hw = 128;
   const green = lDogleg(stemX, cupX, teeY, cornerY, cupY, hw);
   const tee = { x: stemX, y: teeY };
-  const cup = { x: cupX + 12, y: cupY };
-  // Corner blocker — safe route around; narrow shortcut gap near inner corner
+  const cup = { x: cupX + 18, y: cupY };
   const walls = [
-    wall(stemX + hw * 0.4, cornerY - 10, 110, 18),
-    // Outer nudge wall on finish
-    wall(cupX - hw + 8, cupY + 80, 18, 100),
+    wall(stemX + hw * 0.4, cornerY - 14, 170, 26),
+    wall(cupX - hw + 12, cupY + 120, 26, 150),
   ];
-  // Shortcut: thin sand-lined alley through the corner (risky)
-  const zones = [
-    zone(stemX + hw + 36, cornerY + 8, 40, 36, 'sand'),
-  ];
+  const zones = [zone(stemX + hw + 55, cornerY + 12, 58, 50, 'sand')];
   return finish({
     id: 2,
     name: 'Dogleg Delight',
@@ -338,46 +329,48 @@ function hole2(): HoleDef {
     tee,
     cup,
     walls,
-    bumpers: [{ x: (stemX + cupX) / 2, y: cornerY + 6, r: 17 }],
+    bumpers: [{ x: (stemX + cupX) / 2, y: cornerY + 8, r: 22 }],
     zones,
     theme: 'autumn',
     windDeg: 200,
     windMph: 10,
-    topo: topo(-0.45, -0.4, 0.78, [
-      { x: 0.3, y: 0.55, amp: 0.45, rx: 0.2, ry: 0.25 },
-      { x: 0.7, y: 0.3, amp: -0.35, rx: 0.18, ry: 0.18 },
-      { x: 0.55, y: 0.7, amp: 0.25, rx: 0.15, ry: 0.15 },
+    topo: topo(-0.62, -0.58, 1.05, [
+      { x: 0.28, y: 0.58, amp: 0.58, rx: 0.24, ry: 0.28 },
+      { x: 0.72, y: 0.28, amp: -0.48, rx: 0.22, ry: 0.2 },
+      { x: 0.55, y: 0.72, amp: 0.32, rx: 0.18, ry: 0.18 },
     ]),
-    pathVia: [{ x: stemX, y: cornerY }, { x: cupX, y: cornerY }],
+    pathVia: [
+      { x: stemX, y: cornerY },
+      { x: cupX, y: cornerY },
+    ],
     features: ['dogleg', 'shortcut'],
   });
 }
 
 // ─── Hole 3 — Par 4 windmill gate ────────────────────────────────────────────
 function hole3(): HoleDef {
-  const W = 560;
-  const H = 880;
+  const W = 860;
+  const H = 1320;
   const cx = W / 2;
-  const teeY = H - 88;
-  const cupY = 95;
-  const hw = 100;
+  const teeY = H - 118;
+  const cupY = 125;
+  const hw = 158;
   const green = vertLane(cx, teeY, cupY, hw);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx - 18, y: cupY };
+  const cup = { x: cx - 28, y: cupY };
   const millY = H * 0.5;
-  // Static side rails leave center for the windmill
   const walls = [
-    wall(cx - hw + 8, millY + 90, 28, 120),
-    wall(cx + hw - 36, millY - 210, 28, 120),
+    wall(cx - hw + 12, millY + 140, 40, 180),
+    wall(cx + hw - 52, millY - 320, 40, 180),
   ];
   const props: CourseProp[] = [
     {
       kind: 'windmill',
       x: cx,
       y: millY,
-      r: 22,
-      bladeLen: 78,
-      rps: 0.22,
+      r: 28,
+      bladeLen: 110,
+      rps: 0.2,
       gapHalf: 0.38,
       blades: 4,
     },
@@ -392,38 +385,39 @@ function hole3(): HoleDef {
     tee,
     cup,
     walls,
-    bumpers: [{ x: cx + 40, y: millY + 110, r: 15 }],
+    bumpers: [{ x: cx + 60, y: millY + 160, r: 18 }],
     props,
     theme: 'castle',
     windDeg: 90,
     windMph: 8,
-    topo: topo(0.5, -0.35, 0.8, [
-      { x: 0.5, y: 0.5, amp: 0.5, rx: 0.28, ry: 0.22 },
-      { x: 0.3, y: 0.25, amp: -0.3, rx: 0.16, ry: 0.16 },
+    // Dome under mill + left break toward cup
+    topo: topo(0.68, -0.48, 1.08, [
+      { x: 0.5, y: 0.5, amp: 0.7, rx: 0.32, ry: 0.26 },
+      { x: 0.28, y: 0.22, amp: -0.42, rx: 0.18, ry: 0.18 },
+      { x: 0.7, y: 0.7, amp: -0.3, rx: 0.2, ry: 0.2 },
     ]),
     features: ['windmill'],
   });
 }
 
-// ─── Hole 4 — Par 3 short bank / narrow ──────────────────────────────────────
+// ─── Hole 4 — Par 3 short bank / narrow (still tighter, but roomier than before)
 function hole4(): HoleDef {
-  const W = 420;
-  const H = 700;
+  const W = 640;
+  const H = 1060;
   const cx = W / 2;
-  const teeY = H - 80;
-  const cupY = 85;
-  const hw = 58;
-  const green = vertLane(cx, teeY, cupY, hw, 22);
+  const teeY = H - 110;
+  const cupY = 115;
+  const hw = 96;
+  const green = vertLane(cx, teeY, cupY, hw, 30);
   const tee = { x: cx, y: teeY };
   const cup = { x: cx, y: cupY };
-  // Staggered inner rails — bank shots
-  const leftX = cx - hw + 6;
-  const rightX = cx + hw - 20;
+  const leftX = cx - hw + 8;
+  const rightX = cx + hw - 28;
   const walls = [
-    wall(leftX, teeY - 160, 16, 90),
-    wall(rightX, teeY - 280, 16, 90),
-    wall(leftX, teeY - 400, 16, 80),
-    wall(cx - hw * 0.7, cupY + 50, hw * 1.4, 14),
+    wall(leftX, teeY - 240, 22, 130),
+    wall(rightX, teeY - 420, 22, 130),
+    wall(leftX, teeY - 600, 22, 120),
+    wall(cx - hw * 0.7, cupY + 70, hw * 1.4, 18),
   ];
   return finish({
     id: 4,
@@ -439,37 +433,36 @@ function hole4(): HoleDef {
     grass: carpet(Math.PI / 2),
     windDeg: 0,
     windMph: 4,
-    topo: topo(-0.65, -0.25, 0.88, [
-      { x: 0.4, y: 0.45, amp: 0.55, rx: 0.2, ry: 0.3 },
-      { x: 0.65, y: 0.6, amp: -0.4, rx: 0.18, ry: 0.2 },
+    // Strong left bank slope — across-slope putts curve hard
+    topo: topo(-0.92, -0.35, 1.12, [
+      { x: 0.38, y: 0.45, amp: 0.7, rx: 0.22, ry: 0.34 },
+      { x: 0.68, y: 0.62, amp: -0.52, rx: 0.2, ry: 0.22 },
     ]),
     features: ['narrow', 'bank'],
   });
 }
 
-// ─── Hole 5 — Par 4 water hazard (~20% of course) ────────────────────────────
+// ─── Hole 5 — Par 4 water hazard ─────────────────────────────────────────────
 function hole5(): HoleDef {
-  const W = 600;
-  const H = 920;
+  const W = 920;
+  const H = 1380;
   const cx = W / 2;
-  const teeY = H - 95;
-  const cupY = 100;
+  const teeY = H - 125;
+  const cupY = 130;
   const neck0 = H * 0.5;
   const neck1 = H * 0.36;
-  const green = islandBridge(cx, teeY, cupY, 120, 46, 100, neck0, neck1);
+  const green = islandBridge(cx, teeY, cupY, 180, 68, 150, neck0, neck1);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx + 14, y: cupY };
+  const cup = { x: cx + 22, y: cupY };
   const midY = (neck0 + neck1) / 2;
-  // Water on the wide tee-pad flanks (still inside green) — miss the bridge and splash
   const zones = [
-    zone(cx - 78, (teeY + neck0) * 0.5 + 10, 52, 100, 'water'),
-    zone(cx + 78, (teeY + neck0) * 0.5 + 10, 52, 100, 'water'),
-    zone(cx, neck0 - 28, 70, 36, 'sand'),
+    zone(cx - 118, (teeY + neck0) * 0.5 + 14, 76, 150, 'water'),
+    zone(cx + 118, (teeY + neck0) * 0.5 + 14, 76, 150, 'water'),
+    zone(cx, neck0 - 40, 100, 50, 'sand'),
   ];
-  // Soft gate before bridge
   const walls = [
-    wall(cx - 70, neck0 + 20, 40, 16),
-    wall(cx + 30, neck0 + 20, 40, 16),
+    wall(cx - 105, neck0 + 28, 58, 22),
+    wall(cx + 47, neck0 + 28, 58, 22),
   ];
   return finish({
     id: 5,
@@ -482,14 +475,15 @@ function hole5(): HoleDef {
     cup,
     walls,
     zones,
-    bumpers: [{ x: cx, y: neck1 - 40, r: 15 }],
-    props: [{ kind: 'sign', x: cx + 140, y: teeY - 40, text: 'BRIDGE' }],
+    bumpers: [{ x: cx, y: neck1 - 55, r: 18 }],
+    props: [{ kind: 'sign', x: cx + 200, y: teeY - 50, text: 'BRIDGE' }],
     theme: 'pirate',
     windDeg: 160,
     windMph: 12,
-    topo: topo(0.25, -0.6, 0.75, [
-      { x: 0.5, y: 0.7, amp: 0.3, rx: 0.25, ry: 0.2 },
-      { x: 0.45, y: 0.25, amp: -0.4, rx: 0.2, ry: 0.18 },
+    topo: topo(0.38, -0.82, 1.0, [
+      { x: 0.5, y: 0.72, amp: 0.4, rx: 0.28, ry: 0.22 },
+      { x: 0.42, y: 0.22, amp: -0.55, rx: 0.24, ry: 0.2 },
+      { x: 0.6, y: 0.45, amp: 0.3, rx: 0.18, ry: 0.2 },
     ]),
     pathVia: [{ x: cx, y: midY }],
     features: ['water'],
@@ -498,41 +492,38 @@ function hole5(): HoleDef {
 
 // ─── Hole 6 — Par 5 long + jump shortcut ─────────────────────────────────────
 function hole6(): HoleDef {
-  const W = 700;
-  const H = 1040;
-  const x0 = 200;
-  const x1 = 500;
-  const teeY = H - 95;
+  const W = 1080;
+  const H = 1560;
+  const x0 = 300;
+  const x1 = 780;
+  const teeY = H - 125;
   const yA = H * 0.62;
   const yB = H * 0.34;
-  const cupY = 95;
-  const hw = 72;
+  const cupY = 125;
+  const hw = 118;
   const green = zChannel(x0, x1, teeY, yA, yB, cupY, hw);
   const tee = { x: x0, y: teeY };
-  const cup = { x: x0 - 10, y: cupY };
-  // Water in the middle of the long safe route
+  const cup = { x: x0 - 14, y: cupY };
   const zones = [
-    zone(x1, (yA + yB) / 2, 70, 90, 'water'),
-    zone(x0 + 50, (teeY + yA) / 2, 48, 60, 'sand'),
+    zone(x1, (yA + yB) / 2, 100, 130, 'water'),
+    zone(x0 + 75, (teeY + yA) / 2, 70, 90, 'sand'),
   ];
-  // Shortcut ramp: jump from lower arm across water toward upper finish
   const ramp: Ramp = {
-    x: x0 + hw - 8,
-    y: yA - 30,
-    w: 70,
-    h: 50,
+    x: x0 + hw - 10,
+    y: yA - 42,
+    w: 100,
+    h: 70,
     dir: { x: 0.15, y: -1 },
     minSpeed: 5.5,
     boost: 1.15,
-    gap: 160,
+    gap: 220,
   };
-  // Normalize dir
   const dl = Math.hypot(ramp.dir.x, ramp.dir.y) || 1;
   ramp.dir = { x: ramp.dir.x / dl, y: ramp.dir.y / dl };
 
   const walls = [
-    wall(x0 + hw * 0.25, yA - 10, Math.max(50, x1 - x0 - hw), 16),
-    wall(x0 + hw * 0.25, yB - 6, Math.max(50, x1 - x0 - hw), 16),
+    wall(x0 + hw * 0.25, yA - 14, Math.max(70, x1 - x0 - hw), 22),
+    wall(x0 + hw * 0.25, yB - 8, Math.max(70, x1 - x0 - hw), 22),
   ];
   return finish({
     id: 6,
@@ -546,15 +537,15 @@ function hole6(): HoleDef {
     walls,
     zones,
     ramps: [ramp],
-    bumpers: [{ x: x1 - 20, y: yA - 40, r: 16 }],
-    props: [{ kind: 'rock', x: x1 + 90, y: (yA + yB) / 2, r: 22 }],
+    bumpers: [{ x: x1 - 30, y: yA - 55, r: 20 }],
+    props: [{ kind: 'rock', x: x1 + 130, y: (yA + yB) / 2, r: 28 }],
     theme: 'desert',
     windDeg: -120,
     windMph: 14,
-    topo: topo(-0.3, -0.7, 0.85, [
-      { x: 0.35, y: 0.6, amp: 0.45, rx: 0.22, ry: 0.2 },
-      { x: 0.7, y: 0.4, amp: -0.35, rx: 0.2, ry: 0.22 },
-      { x: 0.4, y: 0.2, amp: 0.3, rx: 0.16, ry: 0.16 },
+    topo: topo(-0.42, -0.88, 1.1, [
+      { x: 0.32, y: 0.62, amp: 0.58, rx: 0.26, ry: 0.22 },
+      { x: 0.72, y: 0.4, amp: -0.48, rx: 0.24, ry: 0.24 },
+      { x: 0.38, y: 0.18, amp: 0.38, rx: 0.18, ry: 0.18 },
     ]),
     pathVia: [
       { x: x0, y: yA },
@@ -568,35 +559,31 @@ function hole6(): HoleDef {
 
 // ─── Hole 7 — Par 4 ramp / jump ──────────────────────────────────────────────
 function hole7(): HoleDef {
-  const W = 560;
-  const H = 900;
+  const W = 860;
+  const H = 1360;
   const cx = W / 2;
-  const teeY = H - 90;
-  const cupY = 95;
-  const hw = 96;
+  const teeY = H - 120;
+  const cupY = 125;
+  const hw = 150;
   const green = vertLane(cx, teeY, cupY, hw);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx + 20, y: cupY };
-  // Sand pit in center — jump over or go around via side lanes
+  const cup = { x: cx + 30, y: cupY };
   const sandY = H * 0.48;
-  const zones = [
-    zone(cx, sandY, 120, 100, 'sand'),
-  ];
-  // Side walls force either bank around or ramp jump
+  const zones = [zone(cx, sandY, 180, 150, 'sand')];
   const walls = [
-    wall(cx - 40, sandY - 60, 80, 18),
-    wall(cx - hw + 10, sandY - 20, 30, 80),
-    wall(cx + hw - 40, sandY - 20, 30, 80),
+    wall(cx - 58, sandY - 85, 116, 24),
+    wall(cx - hw + 14, sandY - 28, 44, 120),
+    wall(cx + hw - 58, sandY - 28, 44, 120),
   ];
   const ramp: Ramp = {
-    x: cx - 35,
-    y: sandY + 55,
-    w: 70,
-    h: 45,
+    x: cx - 48,
+    y: sandY + 80,
+    w: 96,
+    h: 62,
     dir: { x: 0, y: -1 },
     minSpeed: 5.2,
     boost: 1.2,
-    gap: 130,
+    gap: 190,
   };
   return finish({
     id: 7,
@@ -610,14 +597,15 @@ function hole7(): HoleDef {
     walls,
     zones,
     ramps: [ramp],
-    bumpers: [{ x: cx - 55, y: sandY + 20, r: 14 }],
-    props: [{ kind: 'sign', x: cx + 130, y: sandY + 40, text: 'JUMP' }],
+    bumpers: [{ x: cx - 80, y: sandY + 30, r: 18 }],
+    props: [{ kind: 'sign', x: cx + 190, y: sandY + 55, text: 'JUMP' }],
     theme: 'space',
     windDeg: 45,
     windMph: 9,
-    topo: topo(0.4, -0.5, 0.82, [
-      { x: 0.5, y: 0.55, amp: 0.5, rx: 0.24, ry: 0.2 },
-      { x: 0.35, y: 0.3, amp: -0.35, rx: 0.18, ry: 0.18 },
+    topo: topo(0.55, -0.7, 1.05, [
+      { x: 0.5, y: 0.55, amp: 0.62, rx: 0.28, ry: 0.22 },
+      { x: 0.32, y: 0.28, amp: -0.45, rx: 0.2, ry: 0.2 },
+      { x: 0.7, y: 0.4, amp: 0.28, rx: 0.16, ry: 0.18 },
     ]),
     features: ['ramp', 'jump'],
   });
@@ -625,28 +613,25 @@ function hole7(): HoleDef {
 
 // ─── Hole 8 — Par 4 volcano / lava ───────────────────────────────────────────
 function hole8(): HoleDef {
-  const W = 580;
-  const H = 880;
+  const W = 900;
+  const H = 1320;
   const cx = W / 2;
-  const teeY = H - 90;
-  const cupY = 100;
-  const hw = 98;
+  const teeY = H - 120;
+  const cupY = 130;
+  const hw = 155;
   const green = vertLane(cx, teeY, cupY, hw);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx - 16, y: cupY };
+  const cup = { x: cx - 24, y: cupY };
   const volY = H * 0.48;
   const zones = [
-    zone(cx, volY + 10, 70, 70, 'lava'),
-    zone(cx - 70, volY - 80, 45, 50, 'sand'),
+    zone(cx, volY + 14, 100, 100, 'lava'),
+    zone(cx - 105, volY - 120, 65, 72, 'sand'),
   ];
-  // Paths around the volcano
-  const walls = [
-    wall(cx - 55, volY - 55, 110, 16),
-  ];
+  const walls = [wall(cx - 80, volY - 78, 160, 22)];
   const props: CourseProp[] = [
-    { kind: 'volcano', x: cx, y: volY - 10, r: 48 },
-    { kind: 'rock', x: cx - 110, y: volY + 40, r: 18 },
-    { kind: 'rock', x: cx + 105, y: volY - 30, r: 16 },
+    { kind: 'volcano', x: cx, y: volY - 14, r: 68 },
+    { kind: 'rock', x: cx - 160, y: volY + 55, r: 24 },
+    { kind: 'rock', x: cx + 155, y: volY - 42, r: 22 },
   ];
   return finish({
     id: 8,
@@ -660,14 +645,15 @@ function hole8(): HoleDef {
     walls,
     zones,
     props,
-    bumpers: [{ x: cx + 50, y: volY + 70, r: 15 }],
+    bumpers: [{ x: cx + 72, y: volY + 100, r: 18 }],
     theme: 'volcano',
     windDeg: -80,
     windMph: 11,
-    topo: topo(0.2, -0.75, 0.9, [
-      { x: 0.5, y: 0.48, amp: 0.7, rx: 0.25, ry: 0.22 },
-      { x: 0.3, y: 0.7, amp: -0.3, rx: 0.16, ry: 0.16 },
-      { x: 0.7, y: 0.25, amp: -0.25, rx: 0.15, ry: 0.15 },
+    // Big volcano mound — rolls away from crater, then downhill to cup
+    topo: topo(0.28, -0.95, 1.15, [
+      { x: 0.5, y: 0.48, amp: 0.95, rx: 0.3, ry: 0.26 },
+      { x: 0.28, y: 0.72, amp: -0.4, rx: 0.18, ry: 0.18 },
+      { x: 0.72, y: 0.22, amp: -0.35, rx: 0.18, ry: 0.18 },
     ]),
     features: ['volcano', 'lava'],
   });
@@ -675,33 +661,30 @@ function hole8(): HoleDef {
 
 // ─── Hole 9 — Par 5 finale spectacle + shortcut ──────────────────────────────
 function hole9(): HoleDef {
-  const W = 720;
-  const H = 1080;
-  const stemX = 200;
-  const cupX = 520;
-  const teeY = H - 100;
+  const W = 1100;
+  const H = 1620;
+  const stemX = 300;
+  const cupX = 800;
+  const teeY = H - 130;
   const cornerY = H * 0.4;
-  const cupY = 100;
-  const hw = 76;
-  // Long dogleg with wide lanes
-  const green = lDogleg(stemX, cupX, teeY, cornerY, cupY, hw, 30);
-  // Widen mid with a bulge — still geometric: add via larger hw already
+  const cupY = 130;
+  const hw = 125;
+  const green = lDogleg(stemX, cupX, teeY, cornerY, cupY, hw, 38);
   const tee = { x: stemX, y: teeY };
   const cup = { x: cupX, y: cupY };
   const walls = [
-    wall(stemX + hw * 0.35, cornerY - 12, 130, 18),
-    wall(cupX - hw + 10, cupY + 120, 18, 140),
+    wall(stemX + hw * 0.35, cornerY - 16, 200, 26),
+    wall(cupX - hw + 14, cupY + 170, 26, 200),
   ];
-  // Shortcut ramp across the inner corner (hard to hit)
   const ramp: Ramp = {
-    x: stemX + 40,
-    y: cornerY + 40,
-    w: 55,
-    h: 45,
+    x: stemX + 55,
+    y: cornerY + 55,
+    w: 80,
+    h: 62,
     dir: { x: 0.55, y: -0.85 },
     minSpeed: 6,
     boost: 1.18,
-    gap: 150,
+    gap: 210,
   };
   const dl = Math.hypot(ramp.dir.x, ramp.dir.y) || 1;
   ramp.dir = { x: ramp.dir.x / dl, y: ramp.dir.y / dl };
@@ -710,18 +693,16 @@ function hole9(): HoleDef {
     {
       kind: 'windmill',
       x: cupX,
-      y: cupY + 200,
-      r: 18,
-      bladeLen: 55,
-      rps: 0.28,
+      y: cupY + 280,
+      r: 24,
+      bladeLen: 78,
+      rps: 0.26,
       gapHalf: 0.42,
       blades: 4,
     },
-    { kind: 'sign', x: stemX + 150, y: teeY - 50, text: 'FINALE' },
+    { kind: 'sign', x: stemX + 210, y: teeY - 60, text: 'FINALE' },
   ];
-  const zones = [
-    zone(stemX + hw * 0.5, (teeY + cornerY) / 2, 50, 70, 'sand'),
-  ];
+  const zones = [zone(stemX + hw * 0.5, (teeY + cornerY) / 2, 72, 100, 'sand')];
   return finish({
     id: 9,
     name: 'Fooze Finale',
@@ -736,19 +717,22 @@ function hole9(): HoleDef {
     ramps: [ramp],
     props,
     bumpers: [
-      { x: (stemX + cupX) / 2 + 20, y: cornerY, r: 18 },
-      { x: cupX - 40, y: cupY + 80, r: 14 },
+      { x: (stemX + cupX) / 2 + 28, y: cornerY, r: 22 },
+      { x: cupX - 55, y: cupY + 110, r: 18 },
     ],
     theme: 'candy',
     windDeg: 30,
     windMph: 15,
-    topo: topo(-0.55, -0.45, 0.92, [
-      { x: 0.35, y: 0.6, amp: 0.5, rx: 0.22, ry: 0.22 },
-      { x: 0.7, y: 0.35, amp: -0.4, rx: 0.2, ry: 0.2 },
-      { x: 0.55, y: 0.2, amp: 0.35, rx: 0.18, ry: 0.15 },
-      { x: 0.4, y: 0.8, amp: -0.25, rx: 0.15, ry: 0.15 },
+    topo: topo(-0.72, -0.62, 1.12, [
+      { x: 0.32, y: 0.62, amp: 0.62, rx: 0.26, ry: 0.26 },
+      { x: 0.72, y: 0.32, amp: -0.52, rx: 0.24, ry: 0.22 },
+      { x: 0.55, y: 0.18, amp: 0.42, rx: 0.2, ry: 0.16 },
+      { x: 0.38, y: 0.82, amp: -0.32, rx: 0.18, ry: 0.18 },
     ]),
-    pathVia: [{ x: stemX, y: cornerY }, { x: cupX, y: cornerY }],
+    pathVia: [
+      { x: stemX, y: cornerY },
+      { x: cupX, y: cornerY },
+    ],
     features: ['shortcut', 'ramp', 'windmill', 'finale'],
   });
 }

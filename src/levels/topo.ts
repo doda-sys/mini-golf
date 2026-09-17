@@ -12,13 +12,17 @@ export type TopoBump = {
 /**
  * Coherent per-hole height field. Same seed ⇒ same break in multiplayer.
  * Height is relative; downhill for physics is −∇h.
+ *
+ * Units: sampleHeight returns relative elevation (order ~1 across a green).
+ * sampleDownhill returns −∇h scaled by the green's characteristic length so
+ * a unit tilt produces O(1) force independent of board pixel size.
  */
 export type GreenTopo = {
   bumps: TopoBump[];
-  /** Global planar tilt (world-ish, small). */
+  /** Global planar tilt across normalized green AABB. */
   tiltX: number;
   tiltY: number;
-  /** Overall break strength ~0.15–1. */
+  /** Overall break strength ~0.4–1.2. */
   strength: number;
 };
 
@@ -49,7 +53,12 @@ function toLocal(x: number, y: number, b: GreenBounds): Vec2 {
   return { x: (x - b.minX) / w, y: (y - b.minY) / h };
 }
 
-/** Height at world point (relative units). */
+/** Characteristic length of the green AABB (world px). */
+export function greenCharLen(b: GreenBounds): number {
+  return Math.max(b.maxX - b.minX, b.maxY - b.minY, 1);
+}
+
+/** Height at world point (relative elevation units). */
 export function sampleHeight(topo: GreenTopo, x: number, y: number, b: GreenBounds): number {
   const loc = toLocal(x, y, b);
   let h = topo.tiltX * (loc.x - 0.5) + topo.tiltY * (loc.y - 0.5);
@@ -62,22 +71,25 @@ export function sampleHeight(topo: GreenTopo, x: number, y: number, b: GreenBoun
 }
 
 /**
- * World-space downhill acceleration direction (not normalized).
- * Magnitude grows with local steepness; scaled gently for playability.
+ * World-force downhill vector ≈ −∇h · L, where L is green characteristic length.
+ * Magnitude is O(tilt·strength) (~0.2–1.2), independent of board pixel scale.
+ * Physics applies: a = SLOPE_G * downhill (gravity-style).
  */
 export function sampleDownhill(topo: GreenTopo, x: number, y: number, b: GreenBounds): Vec2 {
-  const eps = 3;
+  const eps = Math.max(4, greenCharLen(b) * 0.008);
   const hx0 = sampleHeight(topo, x - eps, y, b);
   const hx1 = sampleHeight(topo, x + eps, y, b);
   const hy0 = sampleHeight(topo, x, y - eps, b);
   const hy1 = sampleHeight(topo, x, y + eps, b);
-  // ∇h in world ≈ (dh/dx, dh/dy); downhill = −∇h
+  // Raw world ∇h (elevation per px) — tiny because height is O(1) over hundreds of px
   const gx = (hx1 - hx0) / (2 * eps);
   const gy = (hy1 - hy0) / (2 * eps);
-  return { x: -gx, y: -gy };
+  const L = greenCharLen(b);
+  // −∇h · L ⇒ dimensionless-ish fall-line strength the player can feel
+  return { x: -gx * L, y: -gy * L };
 }
 
-/** Steepness magnitude at a point (for heatmap). */
+/** Steepness magnitude at a point (for heatmap / rest checks). */
 export function sampleSteepness(topo: GreenTopo, x: number, y: number, b: GreenBounds): number {
   const d = sampleDownhill(topo, x, y, b);
   return Math.hypot(d.x, d.y);
@@ -93,25 +105,24 @@ export function makeTopo(
   const along = { x: pathDir.x / pl, y: pathDir.y / pl };
   const lat = { x: -along.y, y: along.x };
   const side = rng() < 0.5 ? 1 : -1;
-  // Mild overall tilt: mix along-path and lateral break
-  const mix = 0.25 + rng() * 0.5;
-  const tiltMag = 0.35 + rng() * 0.55;
+  const mix = 0.3 + rng() * 0.45;
+  const tiltMag = 0.55 + rng() * 0.55;
   const tiltX = (along.x * (1 - mix) + lat.x * mix * side) * tiltMag;
   const tiltY = (along.y * (1 - mix) + lat.y * mix * side) * tiltMag;
 
-  const bumpCount = 2 + Math.floor(rng() * 3); // 2–4
+  const bumpCount = 2 + Math.floor(rng() * 3);
   const bumps: TopoBump[] = [];
   for (let i = 0; i < bumpCount; i++) {
     bumps.push({
       x: 0.18 + rng() * 0.64,
       y: 0.18 + rng() * 0.64,
-      amp: (rng() < 0.5 ? -1 : 1) * (0.25 + rng() * 0.55),
-      rx: 0.14 + rng() * 0.22,
-      ry: 0.14 + rng() * 0.22,
+      amp: (rng() < 0.5 ? -1 : 1) * (0.35 + rng() * 0.55),
+      rx: 0.16 + rng() * 0.24,
+      ry: 0.16 + rng() * 0.24,
     });
   }
 
-  const strength = Math.max(0.2, Math.min(1, intensity));
+  const strength = Math.max(0.45, Math.min(1.15, intensity));
   return {
     bumps,
     tiltX: Math.round(tiltX * 1000) / 1000,
