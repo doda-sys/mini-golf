@@ -1,18 +1,19 @@
 import type { HoleDef, PlayerInfo, Vec2, Zone } from '../types';
 import { BALL_RADIUS } from '../physics/world';
 import { len } from '../physics/math';
+import { THEMES, type HoleTheme } from '../levels/themes';
 
 const GRASS_A = '#2d8a4e';
 const GRASS_B = '#267a44';
-const WALL = '#6b4a36';
-const WALL_TOP = '#8b6348';
-const WALL_EDGE = '#3d2a22';
 const SAND = '#e8d5a3';
 const SAND_DARK = '#d4bc80';
 const ICE = '#b8e0f0';
 const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
 const TEE = 'rgba(255,255,255,0.35)';
+
+/** World-space padding around the playable green for themed surroundings. */
+export const THEME_PAD = 56;
 
 export type AimPreview = {
   from: Vec2;
@@ -29,6 +30,7 @@ export class Renderer {
   scale = 1;
   offsetX = 0;
   offsetY = 0;
+  pad = THEME_PAD;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -42,15 +44,25 @@ export class Renderer {
     const maxW = parent.clientWidth || window.innerWidth;
     const maxH = (parent.clientHeight || window.innerHeight) - 8;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const fit = Math.min(maxW / hole.width, maxH / hole.height);
+    const totalW = hole.width + this.pad * 2;
+    const totalH = hole.height + this.pad * 2;
+    const fit = Math.min(maxW / totalW, maxH / totalH);
     this.scale = fit;
-    this.viewW = hole.width * fit;
-    this.viewH = hole.height * fit;
+    this.viewW = totalW * fit;
+    this.viewH = totalH * fit;
     this.canvas.style.width = `${this.viewW}px`;
     this.canvas.style.height = `${this.viewH}px`;
     this.canvas.width = Math.floor(this.viewW * this.dpr);
     this.canvas.height = Math.floor(this.viewH * this.dpr);
-    this.ctx.setTransform(this.dpr * fit, 0, 0, this.dpr * fit, 0, 0);
+    // Translate so (0,0) is the playable green origin; pad draws in negative space
+    this.ctx.setTransform(
+      this.dpr * fit,
+      0,
+      0,
+      this.dpr * fit,
+      this.dpr * fit * this.pad,
+      this.dpr * fit * this.pad,
+    );
     this.offsetX = (maxW - this.viewW) / 2;
     this.offsetY = 0;
   }
@@ -58,8 +70,8 @@ export class Renderer {
   screenToWorld(clientX: number, clientY: number): Vec2 {
     const rect = this.canvas.getBoundingClientRect();
     return {
-      x: (clientX - rect.left) / this.scale,
-      y: (clientY - rect.top) / this.scale,
+      x: (clientX - rect.left) / this.scale - this.pad,
+      y: (clientY - rect.top) / this.scale - this.pad,
     };
   }
 
@@ -71,9 +83,16 @@ export class Renderer {
     highlightId: string | null,
   ): void {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, hole.width, hole.height);
+    const theme = THEMES[hole.theme] ?? THEMES.tropical;
+    const pad = this.pad;
 
-    // Grass checker with soft vignette feel via slightly varied tiles
+    // Clear full frame including themed surround
+    ctx.clearRect(-pad, -pad, hole.width + pad * 2, hole.height + pad * 2);
+
+    // Themed surroundings (outside the green)
+    drawThemeSurround(ctx, hole, theme, pad);
+
+    // Playable grass checker
     const tile = 40;
     for (let y = 0; y < hole.height; y += tile) {
       for (let x = 0; x < hole.width; x += tile) {
@@ -82,7 +101,12 @@ export class Renderer {
       }
     }
 
-    // Zones (hazards) — polished fills
+    // Soft inner shadow at green edge
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, hole.width - 6, hole.height - 6);
+
+    // Zones (hazards)
     for (const z of hole.zones) {
       drawZone(ctx, z);
     }
@@ -104,12 +128,15 @@ export class Renderer {
     // Cup + flag
     drawCup(ctx, hole.cup.x, hole.cup.y, hole.cupRadius);
 
-    // Walls — wood-like with highlight edge
+    // Walls — theme-colored
     for (const w of hole.walls) {
-      drawWall(ctx, w.x, w.y, w.w, w.h);
+      drawWall(ctx, w.x, w.y, w.w, w.h, theme);
     }
 
-    // Bumpers — glossy with rim highlight
+    // Themed trim ring just outside border walls
+    drawThemeTrim(ctx, hole, theme);
+
+    // Bumpers
     for (const b of hole.bumpers) {
       drawBumper(ctx, b.x, b.y, b.r);
     }
@@ -125,7 +152,6 @@ export class Renderer {
       ctx.lineTo(aim.to.x, aim.to.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      // Power arc
       ctx.strokeStyle = powerColor(aim.power);
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -137,10 +163,7 @@ export class Renderer {
     // Balls
     const sorted = [...players].sort((a, b) => (a.id === localId ? 1 : 0) - (b.id === localId ? 1 : 0));
     for (const p of sorted) {
-      if (p.sunk) {
-        // Dim in cup
-        ctx.globalAlpha = 0.35;
-      }
+      if (p.sunk) ctx.globalAlpha = 0.35;
       const r = BALL_RADIUS;
       const g = ctx.createRadialGradient(p.ball.x - 3, p.ball.y - 3, 1, p.ball.x, p.ball.y, r);
       g.addColorStop(0, '#ffffff');
@@ -159,7 +182,6 @@ export class Renderer {
       }
       ctx.globalAlpha = 1;
 
-      // Name tag
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       const label = p.name;
       ctx.font = '600 11px system-ui,sans-serif';
@@ -172,7 +194,6 @@ export class Renderer {
       ctx.fillText(label, p.ball.x, p.ball.y - r - 15);
     }
 
-    // Speed trails for moving balls
     for (const p of players) {
       const speed = len(p.vel);
       if (speed < 0.5 || p.sunk) continue;
@@ -186,6 +207,208 @@ export class Renderer {
   }
 }
 
+function drawThemeSurround(ctx: CanvasRenderingContext2D, hole: HoleDef, theme: HoleTheme, pad: number): void {
+  const tw = hole.width + pad * 2;
+  const th = hole.height + pad * 2;
+  const g = ctx.createLinearGradient(-pad, -pad, -pad + tw, -pad + th);
+  g.addColorStop(0, theme.outside);
+  g.addColorStop(1, theme.outsideAlt);
+  ctx.fillStyle = g;
+  ctx.fillRect(-pad, -pad, tw, th);
+
+  // Decorative motifs in the pad ring only (clip out the green)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-pad, -pad, tw, th);
+  ctx.rect(hole.width, 0, -hole.width, hole.height); // cut out playable (even-odd)
+  ctx.clip('evenodd');
+
+  const seed = hole.id * 9973;
+  const n = 18 + (hole.id % 12);
+  for (let i = 0; i < n; i++) {
+    const t = ((seed + i * 7919) % 10000) / 10000;
+    const u = ((seed * 3 + i * 6571) % 10000) / 10000;
+    // Place along the frame: map to perimeter
+    let x: number;
+    let y: number;
+    const edge = (t * 4) | 0;
+    const along = t * 4 - edge;
+    if (edge === 0) {
+      x = -pad + along * tw;
+      y = -pad + 8 + u * (pad - 16);
+    } else if (edge === 1) {
+      x = hole.width + 8 + u * (pad - 16);
+      y = -pad + along * th;
+    } else if (edge === 2) {
+      x = -pad + along * tw;
+      y = hole.height + 8 + u * (pad - 16);
+    } else {
+      x = -pad + 8 + u * (pad - 16);
+      y = -pad + along * th;
+    }
+    drawDecorMotif(ctx, theme, x, y, i, seed);
+  }
+  ctx.restore();
+}
+
+function drawDecorMotif(
+  ctx: CanvasRenderingContext2D,
+  theme: HoleTheme,
+  x: number,
+  y: number,
+  i: number,
+  seed: number,
+): void {
+  ctx.save();
+  switch (theme.decor) {
+    case 'palms': {
+      ctx.strokeStyle = '#2d6a4f';
+      ctx.fillStyle = '#40916c';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, y + 14);
+      ctx.quadraticCurveTo(x + 2, y, x, y - 16);
+      ctx.stroke();
+      for (let k = 0; k < 4; k++) {
+        const a = -1.2 + k * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 14);
+        ctx.quadraticCurveTo(x + Math.cos(a) * 18, y - 14 + Math.sin(a) * 10, x + Math.cos(a) * 22, y - 6 + Math.sin(a) * 14);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'cacti': {
+      ctx.fillStyle = '#2d6a4f';
+      roundRect(ctx, x - 4, y - 14, 8, 28, 3);
+      ctx.fill();
+      roundRect(ctx, x - 14, y - 4, 10, 6, 2);
+      ctx.fill();
+      roundRect(ctx, x + 4, y - 8, 10, 6, 2);
+      ctx.fill();
+      break;
+    }
+    case 'snow': {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      const r = 2 + (i % 3);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y);
+      ctx.lineTo(x + 6, y);
+      ctx.moveTo(x, y - 6);
+      ctx.lineTo(x, y + 6);
+      ctx.stroke();
+      break;
+    }
+    case 'lava': {
+      ctx.fillStyle = theme.accent;
+      ctx.globalAlpha = 0.55 + (i % 3) * 0.1;
+      ctx.beginPath();
+      ctx.arc(x, y, 4 + (i % 4), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'grid': {
+      ctx.strokeStyle = theme.trim;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 10, y - 10, 20, 20);
+      ctx.fillStyle = theme.accent;
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x - 2, y - 2, 4, 4);
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'waves': {
+      ctx.strokeStyle = theme.trim;
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 12, y);
+      ctx.quadraticCurveTo(x - 4, y - 6, x, y);
+      ctx.quadraticCurveTo(x + 4, y + 6, x + 12, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'stars': {
+      ctx.fillStyle = i % 2 === 0 ? theme.trim : theme.accent;
+      const s = 1.5 + ((seed + i) % 4);
+      ctx.globalAlpha = 0.5 + (i % 5) * 0.1;
+      ctx.beginPath();
+      for (let k = 0; k < 5; k++) {
+        const a = (k * 4 * Math.PI) / 5 - Math.PI / 2;
+        const r = k % 2 === 0 ? s * 2.2 : s;
+        const px = x + Math.cos(a) * r;
+        const py = y + Math.sin(a) * r;
+        if (k === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'leaves': {
+      ctx.fillStyle = i % 2 === 0 ? theme.accent : theme.trim;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 7, 4, (i % 6) * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'stones': {
+      ctx.fillStyle = theme.trim;
+      ctx.globalAlpha = 0.35;
+      roundRect(ctx, x - 8, y - 5, 16, 10, 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'stripes': {
+      ctx.fillStyle = i % 2 === 0 ? theme.accent : theme.trim;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(x - 8, y - 3, 16, 6);
+      ctx.globalAlpha = 1;
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+function drawThemeTrim(ctx: CanvasRenderingContext2D, hole: HoleDef, theme: HoleTheme): void {
+  ctx.save();
+  ctx.strokeStyle = theme.trim;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 3;
+  ctx.setLineDash(theme.id === 'neon' || theme.decor === 'grid' ? [6, 4] : []);
+  ctx.strokeRect(-4, -4, hole.width + 8, hole.height + 8);
+  ctx.setLineDash([]);
+  ctx.strokeStyle = theme.accent;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-8, -8, hole.width + 16, hole.height + 16);
+  ctx.restore();
+
+  // Theme label chip (top-left outside)
+  ctx.save();
+  ctx.font = '700 11px system-ui,sans-serif';
+  const label = theme.label;
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(ctx, 4, -THEME_PAD + 10, tw + 12, 18, 6);
+  ctx.fill();
+  ctx.fillStyle = theme.trim;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 10, -THEME_PAD + 19);
+  ctx.restore();
+}
+
 function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
   const r = 10;
   if (z.kind === 'sand') {
@@ -196,11 +419,9 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
     ctx.fillStyle = g;
     roundRect(ctx, z.x, z.y, z.w, z.h, r);
     ctx.fill();
-    // Soft edge ring
     ctx.strokeStyle = 'rgba(160,130,70,0.45)';
     ctx.lineWidth = 2;
     ctx.stroke();
-    // Speckle pattern (deterministic, cheap)
     ctx.fillStyle = 'rgba(170,140,70,0.4)';
     const n = Math.min(28, Math.floor((z.w * z.h) / 400));
     for (let i = 0; i < n; i++) {
@@ -221,7 +442,6 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
     ctx.lineWidth = 2;
     ctx.stroke();
-    // Shine streaks
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 3; i++) {
@@ -239,11 +459,9 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
     ctx.fillStyle = g;
     roundRect(ctx, z.x, z.y, z.w, z.h, r);
     ctx.fill();
-    // Soft shore edge
     ctx.strokeStyle = 'rgba(180,230,255,0.35)';
     ctx.lineWidth = 3;
     ctx.stroke();
-    // Wave lines
     ctx.strokeStyle = 'rgba(255,255,255,0.28)';
     ctx.lineWidth = 1.8;
     const waves = Math.max(2, Math.min(5, Math.floor(z.h / 28)));
@@ -259,13 +477,11 @@ function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
 }
 
 function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: number): void {
-  // Outer grass rim (slightly raised look)
   ctx.fillStyle = 'rgba(20,60,35,0.55)';
   ctx.beginPath();
   ctx.arc(cx, cy, cupR + 4, 0, Math.PI * 2);
   ctx.fill();
 
-  // Cup rim (metal-ish ring)
   const rim = ctx.createRadialGradient(cx - 2, cy - 2, cupR * 0.4, cx, cy, cupR + 2);
   rim.addColorStop(0, '#2a2a2a');
   rim.addColorStop(0.7, '#1a1a1a');
@@ -276,7 +492,6 @@ function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: nu
   ctx.arc(cx, cy, cupR + 2, 0, Math.PI * 2);
   ctx.fill();
 
-  // Dark hole interior
   const hole = ctx.createRadialGradient(cx, cy, 1, cx, cy, cupR);
   hole.addColorStop(0, '#000');
   hole.addColorStop(0.7, CUP_DARK);
@@ -286,13 +501,11 @@ function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: nu
   ctx.arc(cx, cy, cupR, 0, Math.PI * 2);
   ctx.fill();
 
-  // Inner shadow ellipse for depth
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.beginPath();
   ctx.ellipse(cx + 1, cy + 2, cupR * 0.55, cupR * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Flagpole
   ctx.strokeStyle = '#f5f5f5';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -300,7 +513,6 @@ function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: nu
   ctx.lineTo(cx, cy - 38);
   ctx.stroke();
 
-  // Flag
   const flagG = ctx.createLinearGradient(cx, cy - 38, cx + 20, cy - 20);
   flagG.addColorStop(0, '#ff6b6b');
   flagG.addColorStop(1, '#c9184a');
@@ -316,20 +528,25 @@ function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: nu
   ctx.stroke();
 }
 
-function drawWall(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+function drawWall(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  theme: HoleTheme,
+): void {
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, WALL_TOP);
-  g.addColorStop(0.35, WALL);
-  g.addColorStop(1, WALL_EDGE);
+  g.addColorStop(0, theme.wallTop);
+  g.addColorStop(0.35, theme.wall);
+  g.addColorStop(1, theme.wallEdge);
   ctx.fillStyle = g;
   roundRect(ctx, x, y, w, h, 5);
   ctx.fill();
-  // Top highlight
   ctx.strokeStyle = 'rgba(255,220,180,0.25)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
-  // Bottom edge shadow
-  ctx.strokeStyle = WALL_EDGE;
+  ctx.strokeStyle = theme.wallEdge;
   ctx.lineWidth = 2;
   ctx.beginPath();
   const rr = Math.min(5, w / 2, h / 2);
@@ -339,7 +556,6 @@ function drawWall(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
 }
 
 function drawBumper(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
-  // Soft shadow
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
   ctx.arc(x + 2, y + 3, r, 0, Math.PI * 2);
@@ -354,18 +570,15 @@ function drawBumper(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();
 
-  // Glossy rim
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // Specular highlight
   ctx.fillStyle = 'rgba(255,255,255,0.45)';
   ctx.beginPath();
   ctx.ellipse(x - r * 0.3, y - r * 0.35, r * 0.35, r * 0.22, -0.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Center dimple
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
   ctx.beginPath();
   ctx.arc(x, y, r * 0.28, 0, Math.PI * 2);

@@ -1,5 +1,5 @@
 import './style.css';
-import { HOLES, getHole } from './levels/holes';
+import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, POOL_SIZE, ROUND_HOLES } from './levels/holes';
 import { Renderer } from './game/renderer';
 import { InputController } from './game/input';
 import {
@@ -45,7 +45,7 @@ app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, toast);
 menuScreen.append(
   el('div', { id: 'menu-decor', text: '⛳' }),
   el('h1', { class: 'logo' }, ['Putt-Putt ', el('span', { text: 'Mini Golf' })]),
-  el('p', { class: 'tagline', text: 'Solo or multiplayer · 9 holes · drag to aim' }),
+  el('p', { class: 'tagline', text: `Solo or multiplayer · ${ROUND_HOLES} holes · from ${POOL_SIZE} · drag to aim` }),
 );
 
 const menuCard = el('div', { class: 'card' });
@@ -81,7 +81,7 @@ menuCard.append(
   menuError,
   el('p', {
     class: 'hint',
-    text: 'Multiplayer uses PeerJS (free cloud broker). Create a room, share the code, take turns on the same hole.',
+    text: 'Multiplayer is peer-to-peer with room codes — both players must keep the tab open. Take turns on the same hole.',
   }),
 );
 menuScreen.append(menuCard);
@@ -207,6 +207,7 @@ function startSolo(): void {
   localId = 'local';
   localName = playerName();
   localColor = COLORS[0];
+  dealCourse();
   holeIndex = 0;
   players = [makePlayer(localId, localName, localColor, getHole(0).tee)];
   balls.clear();
@@ -227,7 +228,7 @@ function layout(): void {
 
 function updateHud(): void {
   const hole = getHole(holeIndex);
-  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par}`;
+  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par} · ${hole.name}`;
   const me = localPlayer();
   const st = holeStrokes.get(localId) ?? 0;
   strokesPill.textContent = `Strokes ${st}`;
@@ -463,8 +464,8 @@ function renderLobbyPlayers(): void {
   );
   startBtn.style.display = isHost ? '' : 'none';
   lobbyHint.textContent = isHost
-    ? 'Share the room code. Start when everyone has joined.'
-    : 'Waiting for host to start…';
+    ? 'Share the room code and keep this tab open. Start when everyone has joined.'
+    : 'Waiting for host to start… Keep this tab open.';
 }
 
 function setupNetHandlers(): GolfNet {
@@ -479,8 +480,7 @@ function setupNetHandlers(): GolfNet {
     },
     onConnectionChange: () => {},
     onPeerJoined: (peerId) => {
-      if (!isHost) return;
-      // Wait for hello
+      showToast(isHost ? 'Player connecting…' : 'Connected to host');
       void peerId;
     },
     onPeerLeft: (peerId) => {
@@ -512,6 +512,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
           holeIndex,
           turnPlayerId,
           mode: mode === 'playing' ? 'playing' : 'lobby',
+          holeIds: courseHoleIds.length ? courseHoleIds : undefined,
         },
         fromId,
       );
@@ -520,6 +521,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       break;
     }
     case 'welcome': {
+      if (msg.holeIds?.length) loadCourse(msg.holeIds, courseSeed);
       players = msg.players;
       holeIndex = msg.holeIndex;
       turnPlayerId = msg.turnPlayerId;
@@ -550,6 +552,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       players.push(msg.player);
       balls.set(msg.player.id, createBall(msg.player.ball));
       renderLobbyPlayers();
+      showToast(`${msg.player.name} joined`);
       break;
     }
     case 'player-left': {
@@ -560,6 +563,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       break;
     }
     case 'start': {
+      if (msg.holeIds?.length) loadCourse(msg.holeIds, msg.courseSeed);
       holeIndex = msg.holeIndex;
       turnPlayerId = msg.turnPlayerId;
       resetHolePositions();
@@ -650,7 +654,7 @@ async function createRoom(): Promise<void> {
     lobbyCode.textContent = roomCode;
     renderLobbyPlayers();
     showScreen('lobby');
-    showToast(`Room ${roomCode} created`);
+    showToast(`Room ${roomCode} created — keep this tab open`);
   } catch (e) {
     menuError.textContent = e instanceof Error ? e.message : String(e);
     destroyNet();
@@ -692,6 +696,7 @@ async function joinRoom(): Promise<void> {
 
 function startMultiplayerRound(): void {
   if (!isHost) return;
+  const ids = dealCourse();
   holeIndex = 0;
   for (const p of players) {
     p.strokes = [];
@@ -706,7 +711,7 @@ function startMultiplayerRound(): void {
   roomPill.textContent = roomCode;
   layout();
   updateHud();
-  net?.broadcast({ type: 'start', holeIndex, turnPlayerId });
+  net?.broadcast({ type: 'start', holeIndex, turnPlayerId, holeIds: ids, courseSeed });
   showToast('Round started!');
 }
 

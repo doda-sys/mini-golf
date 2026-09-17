@@ -8,11 +8,11 @@
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "peerjs": "^1.5.4"
-  },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "@trystero-p2p/torrent": "^0.25.4"
   }
 }

@@ -1,17 +1,15 @@
-import Peer, { type DataConnection } from 'peerjs';
+import { joinRoom, selfId, type Room, type MessageAction } from '@trystero-p2p/torrent';
 import type { NetMessage, PlayerInfo } from '../types';
 
-const PREFIX = 'minigolf-';
+const APP_ID = 'putt-putt-mini-golf-doda';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const JOIN_ATTEMPTS = 3;
+const JOIN_PEER_TIMEOUT_MS = 14000;
 
 export function generateRoomCode(len = 5): string {
   let s = '';
   for (let i = 0; i < len; i++) s += ALPHABET[(Math.random() * ALPHABET.length) | 0];
   return s;
-}
-
-export function peerIdFromCode(code: string): string {
-  return PREFIX + code.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 export type NetHandlers = {
@@ -23,20 +21,24 @@ export type NetHandlers = {
   onPeerLeft: (peerId: string) => void;
 };
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /**
- * PeerJS room sync:
- * - Host creates Peer with id = minigolf-{CODE}
- * - Guests join with random peer id and connect to host peer id
- * - Host relays state; turn-based putts broadcast to all
+ * Trystero (BitTorrent tracker) room sync:
+ * Host and guests both joinRoom({ appId }, roomCode) — no custom peer-id lookup.
+ * Turn-based NetMessage protocol is preserved for main.ts.
  */
 export class GolfNet {
-  peer: Peer | null = null;
   isHost = false;
   roomCode = '';
   localPeerId = '';
-  private conns = new Map<string, DataConnection>();
+  private room: Room | null = null;
+  private action: MessageAction<NetMessage> | null = null;
+  private peers = new Set<string>();
   private handlers: NetHandlers;
-  private hostConn: DataConnection | null = null;
+  private generation = 0;
 
   constructor(handlers: NetHandlers) {
     this.handlers = handlers;
@@ -46,8 +48,7 @@ export class GolfNet {
     this.destroy();
     this.isHost = true;
     this.roomCode = (code ?? generateRoomCode(5)).toUpperCase();
-    const id = peerIdFromCode(this.roomCode);
-    await this.openPeer(id);
+    await this.openRoom(this.roomCode, false);
     return this.roomCode;
   }
 
@@ -58,100 +59,110 @@ export class GolfNet {
     if (this.roomCode.length < 4 || this.roomCode.length > 6) {
       throw new Error('Room code must be 4–6 characters');
     }
-    await this.openPeer(); // random id
-    const hostId = peerIdFromCode(this.roomCode);
-    const conn = this.peer!.connect(hostId, { reliable: true });
-    this.wireConn(conn);
-    this.hostConn = conn;
-    await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('Could not reach room. Check the code and try again.')), 12000);
-      conn.on('open', () => {
-        clearTimeout(t);
-        this.handlers.onConnectionChange(true);
-        resolve();
-      });
-      conn.on('error', (e) => {
-        clearTimeout(t);
-        reject(e);
-      });
-    });
-  }
 
-  private openPeer(id?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const peer = id ? new Peer(id) : new Peer();
-      this.peer = peer;
-      const fail = (err: Error) => {
-        this.handlers.onError(err.message || String(err));
-        reject(err);
-      };
-      peer.on('open', (pid) => {
-        this.localPeerId = pid;
-        this.handlers.onOpen(pid, this.isHost);
-        resolve();
-      });
-      peer.on('error', (err) => {
-        const msg = (err as { type?: string; message?: string }).message || String(err);
-        const type = (err as { type?: string }).type;
-        if (type === 'unavailable-id') {
-          fail(new Error('That room code is taken — try Create again.'));
-        } else if (type === 'peer-unavailable') {
-          fail(new Error('Room not found. Ask the host for the code.'));
-        } else {
-          fail(new Error(msg));
-        }
-      });
-      peer.on('connection', (conn) => {
-        if (!this.isHost) return;
-        this.wireConn(conn);
-      });
-      peer.on('disconnected', () => this.handlers.onConnectionChange(false));
-    });
-  }
-
-  private wireConn(conn: DataConnection): void {
-    conn.on('open', () => {
-      this.conns.set(conn.peer, conn);
-      this.handlers.onPeerJoined(conn.peer);
-      this.handlers.onConnectionChange(true);
-    });
-    conn.on('data', (data) => {
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < JOIN_ATTEMPTS; attempt++) {
       try {
-        const msg = data as NetMessage;
-        this.handlers.onMessage(msg, conn.peer);
-      } catch {
-        /* ignore */
+        await this.openRoom(this.roomCode, true);
+        return;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+        this.destroy();
+        if (attempt < JOIN_ATTEMPTS - 1) await sleep(700 * (attempt + 1));
       }
-    });
-    conn.on('close', () => {
-      this.conns.delete(conn.peer);
-      this.handlers.onPeerLeft(conn.peer);
-    });
-    conn.on('error', () => {
-      this.conns.delete(conn.peer);
-      this.handlers.onPeerLeft(conn.peer);
+    }
+    throw new Error(
+      lastErr?.message ||
+        'Could not join. Keep the host tab open, check the code, or create a fresh room.',
+    );
+  }
+
+  private async openRoom(roomCode: string, waitForPeer: boolean): Promise<void> {
+    const gen = ++this.generation;
+    this.localPeerId = selfId;
+    this.peers.clear();
+
+    const room = joinRoom(
+      { appId: APP_ID },
+      roomCode,
+      {
+        onJoinError: (details) => {
+          if (gen !== this.generation) return;
+          this.handlers.onError(
+            details.error ||
+              'Connection failed. Keep the host tab open and try a fresh room if needed.',
+          );
+        },
+      },
+    );
+    this.room = room;
+
+    const action = room.makeAction<NetMessage>('golf');
+    this.action = action;
+    action.onMessage = (data, { peerId }) => {
+      if (gen !== this.generation) return;
+      this.handlers.onMessage(data, peerId);
+    };
+
+    room.onPeerJoin = (peerId) => {
+      if (gen !== this.generation) return;
+      this.peers.add(peerId);
+      this.handlers.onPeerJoined(peerId);
+      this.handlers.onConnectionChange(true);
+    };
+    room.onPeerLeave = (peerId) => {
+      if (gen !== this.generation) return;
+      this.peers.delete(peerId);
+      this.handlers.onPeerLeft(peerId);
+      this.handlers.onConnectionChange(this.peers.size > 0);
+    };
+
+    // Already-connected peers (rare race)
+    for (const id of Object.keys(room.getPeers())) {
+      this.peers.add(id);
+      this.handlers.onPeerJoined(id);
+    }
+    if (this.peers.size > 0) this.handlers.onConnectionChange(true);
+
+    this.handlers.onOpen(selfId, this.isHost);
+
+    if (!waitForPeer) return;
+
+    if (this.peers.size > 0) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => {
+        reject(
+          new Error(
+            'Room not reachable. Keep the host’s tab open, double-check the code, or create a fresh room.',
+          ),
+        );
+      }, JOIN_PEER_TIMEOUT_MS);
+
+      const prevJoin = room.onPeerJoin;
+      room.onPeerJoin = (peerId) => {
+        prevJoin?.(peerId);
+        clearTimeout(t);
+        resolve();
+      };
     });
   }
 
   send(msg: NetMessage, toId?: string): void {
+    if (!this.action) return;
     if (toId) {
-      this.conns.get(toId)?.send(msg);
+      void this.action.send(msg, { target: toId });
       return;
     }
-    if (this.isHost) {
-      for (const c of this.conns.values()) c.send(msg);
-    } else if (this.hostConn) {
-      this.hostConn.send(msg);
-    }
+    void this.action.send(msg);
   }
 
-  /** Host relays a message to everyone except optional exclude */
+  /** Host relays to everyone except optional exclude (targeted send). */
   relay(msg: NetMessage, excludeId?: string): void {
-    if (!this.isHost) return;
-    for (const [id, c] of this.conns) {
-      if (id === excludeId) continue;
-      c.send(msg);
-    }
+    if (!this.isHost || !this.action) return;
+    const targets = [...this.peers].filter((id) => id !== excludeId);
+    if (targets.length === 0) return;
+    void this.action.send(msg, { target: targets });
   }
 
   broadcast(msg: NetMessage): void {
@@ -159,23 +170,18 @@ export class GolfNet {
   }
 
   destroy(): void {
-    for (const c of this.conns.values()) {
+    this.generation++;
+    this.peers.clear();
+    this.action = null;
+    if (this.room) {
+      const r = this.room;
+      this.room = null;
       try {
-        c.close();
+        void r.leave();
       } catch {
         /* */
       }
     }
-    this.conns.clear();
-    this.hostConn = null;
-    if (this.peer) {
-      try {
-        this.peer.destroy();
-      } catch {
-        /* */
-      }
-    }
-    this.peer = null;
   }
 }
 

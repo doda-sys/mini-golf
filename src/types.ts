@@ -22,6 +22,18 @@ export type Zone = {
   kind: 'sand' | 'ice' | 'water';
 };
 
+export type HoleThemeId =
+  | 'tropical'
+  | 'desert'
+  | 'arctic'
+  | 'volcano'
+  | 'neon'
+  | 'pirate'
+  | 'space'
+  | 'autumn'
+  | 'castle'
+  | 'candy';
+
 export type HoleDef = {
   id: number;
   name: string;
@@ -34,6 +46,8 @@ export type HoleDef = {
   walls: Wall[];
   bumpers: Bumper[];
   zones: Zone[];
+  /** Visual theme for surroundings outside the green */
+  theme: HoleThemeId;
 };
 
 export type PlayerInfo = {
@@ -52,10 +66,10 @@ export type GameMode = 'menu' | 'solo' | 'lobby' | 'playing' | 'scorecard' | 'fi
 
 export type NetMessage =
   | { type: 'hello'; name: string; color: string }
-  | { type: 'welcome'; players: PlayerInfo[]; hostId: string; holeIndex: number; turnPlayerId: string; mode: string }
+  | { type: 'welcome'; players: PlayerInfo[]; hostId: string; holeIndex: number; turnPlayerId: string; mode: string; holeIds?: number[] }
   | { type: 'player-joined'; player: PlayerInfo }
   | { type: 'player-left'; id: string }
-  | { type: 'start'; holeIndex: number; turnPlayerId: string }
+  | { type: 'start'; holeIndex: number; turnPlayerId: string; holeIds: number[]; courseSeed: number }
   | { type: 'putt'; playerId: string; vx: number; vy: number; ball: Vec2; strokes: number }
   | { type: 'state-sync'; players: PlayerInfo[]; holeIndex: number; turnPlayerId: string; phase: string }
   | { type: 'hole-complete'; playerId: string; strokes: number }

@@ -1,6 +1,8 @@
 # Putt-Putt Mini Golf ⛳
 
-Browser-based top-down miniature golf — solo offline play or real-time multiplayer with short room codes. Built with **Vite + TypeScript + HTML Canvas** and **PeerJS** (free cloud broker) for P2P sync. No accounts, no paid backend.
+Browser-based top-down miniature golf — solo offline play or real-time multiplayer with short room codes. Built with **Vite + TypeScript + HTML Canvas** and **Trystero** (BitTorrent tracker signaling) for peer-to-peer sync. No accounts, no paid backend.
+
+Each round deals **9 holes from a pool of 1,000** procedurally generated courses, each with a themed surround (tropical, desert, arctic, volcano, neon, pirate, space, autumn, castle, candy).
 
 ## How to play
 
@@ -11,17 +13,17 @@ Browser-based top-down miniature golf — solo offline play or real-time multipl
 
 ### Solo
 
-Tap **Play Solo** — works fully offline after the page loads. No network required.
+Tap **Play Solo** — works fully offline after the page loads. No network required. You get a fresh random 9 from the 1000-hole pool.
 
 ### Multiplayer (room codes)
 
-1. One player taps **Create Room** → gets a **5-character code** (e.g. `K7MP2`).
-2. Others enter that code and tap **Join**.
-3. Host taps **Start Round**.
+1. One player taps **Create Room** → gets a **5-character code** (e.g. `K7MP2`). **Keep that tab open.**
+2. Others enter that code and tap **Join** (both players must keep their tabs open).
+3. Host taps **Start Round** — the host deals 9 holes from the 1000-pool and syncs that course to everyone.
 4. **Turn-based stroke play** on the same hole: synced ball positions, whose turn, and strokes.
 5. HUD shows room code, player list, hole, strokes, and whose turn.
 
-Uses [PeerJS](https://peerjs.com/) cloud PeerServer (free). Both players need network access for WebRTC. Solo never needs it.
+Room codes work **peer-to-peer** via WebRTC (Trystero + public BitTorrent trackers for signaling only). Game data stays between browsers. Solo never needs the network.
 
 ## Local development
 
@@ -59,19 +61,17 @@ After the first successful workflow run, the site URL appears on the Actions / P
 
 You can also drop `dist/` onto any static host (Netlify, Cloudflare Pages, S3, nginx, etc.).
 
-### Optional: custom PeerServer
-
-By default the game uses the public PeerJS broker. For heavier traffic, run your own PeerServer and point PeerJS at it in `src/net/peer.ts`.
-
 ## Tech overview
 
 | Piece | Role |
 |--------|------|
 | `src/physics/world.ts` | Circle vs AABB walls, bumper bounce, friction, sand/ice/water, cup sink |
-| `src/levels/holes.ts` | 9 distinct holes |
-| `src/game/renderer.ts` | Canvas drawing |
+| `src/levels/generate.ts` | Procedural 1000-hole catalog + course deal |
+| `src/levels/themes.ts` | Themed surrounds outside each green |
+| `src/levels/holes.ts` | Active 9-hole course from the pool |
+| `src/game/renderer.ts` | Canvas drawing + theme frames |
 | `src/game/input.ts` | Mouse + touch pull-back aim |
-| `src/net/peer.ts` | Room codes + PeerJS host/guest sync |
+| `src/net/peer.ts` | Room codes + Trystero P2P sync |
 | `src/main.ts` | UI, game loop, multiplayer orchestration |
 
 ## Scripts
