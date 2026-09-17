@@ -153,6 +153,32 @@
   gap: var(--plaque-gap);
 }
 
+.plaque__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.plaque__header-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plaque__badge {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255, 202, 58, 0.55);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+  background: #0b3d2e;
+}
+
 .plaque__eyebrow {
   font-size: 9.5px;
   font-weight: 700;

@@ -135,9 +135,28 @@ const toast = el('div', { id: 'toast' });
 
 app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, leaderboardOverlay, toast);
 
-// Menu
+// Menu — Fooze splash full-bleed + scrim for readable controls
+const menuBg = el('div', { id: 'menu-bg', 'aria-hidden': 'true' });
+const menuBgImg = el('img', {
+  id: 'menu-bg-img',
+  src: './fooze-splash-menu.png',
+  alt: '',
+  decoding: 'async',
+});
+const menuScrim = el('div', { id: 'menu-scrim' });
+menuBg.append(menuBgImg, menuScrim);
 menuScreen.append(
-  el('div', { id: 'menu-decor', text: '⛳' }),
+  menuBg,
+  el('div', { id: 'menu-decor' }, [
+    el('img', {
+      class: 'menu-brand-mark',
+      src: './fooze-app-icon-square.png',
+      alt: '',
+      width: '56',
+      height: '56',
+      decoding: 'async',
+    }),
+  ]),
   el('h1', { class: 'logo' }, ['Fooze n Froops ', el('span', { text: 'Mini Golf' })]),
   el('p', { class: 'tagline', text: `Solo or multiplayer · ${ROUND_HOLES} curated holes · drag to aim` }),
 );
@@ -285,8 +304,21 @@ plaqueStripMeta.append(plaqueStripPar, plaqueStripDot, plaqueStripLength);
 plaqueStrip.append(plaqueStripEyebrow, plaqueStripTitle, plaqueStripMeta);
 
 const plaqueBody = el('div', { class: 'plaque__body' });
+const plaqueHeader = el('div', { class: 'plaque__header' });
+const plaqueBadge = el('img', {
+  class: 'plaque__badge',
+  src: './hole-badges/1.png',
+  alt: '',
+  width: '44',
+  height: '44',
+  decoding: 'async',
+  'aria-hidden': 'true',
+});
+const plaqueHeaderText = el('div', { class: 'plaque__header-text' });
 const plaqueEyebrow = el('div', { class: 'plaque__eyebrow', text: 'Hole 01' });
 const plaqueTitle = el('h2', { class: 'plaque__title', text: '' });
+plaqueHeaderText.append(plaqueEyebrow, plaqueTitle);
+plaqueHeader.append(plaqueBadge, plaqueHeaderText);
 const plaqueMeta = el('div', { class: 'plaque__meta' });
 const plaquePar = el('span', { class: 'plaque__par', text: 'Par 3' });
 const plaqueDot = el('span', { class: 'plaque__meta-dot', 'aria-hidden': 'true' });
@@ -298,7 +330,7 @@ const plaqueBestLabel = el('div', { class: 'plaque__best-label', text: 'WORLD BE
 const plaqueBestList = el('ol', { class: 'plaque__best-list' });
 const plaqueBestEmpty = el('p', { class: 'plaque__best-empty', text: 'Be the first' });
 plaqueBest.append(plaqueBestLabel, plaqueBestList, plaqueBestEmpty);
-plaqueBody.append(plaqueEyebrow, plaqueTitle, plaqueMeta, plaqueDivider, plaqueBest);
+plaqueBody.append(plaqueHeader, plaqueMeta, plaqueDivider, plaqueBest);
 
 holePlaque.append(plaqueStrip, plaqueBody);
 
@@ -352,6 +384,12 @@ scoreOverlay.append(scoreCard);
 
 // Leaderboard overlay
 const lbCard = el('div', { class: 'card leaderboard-card' });
+const lbBanner = el('img', {
+  class: 'lb-banner',
+  src: './fooze-leaderboard-banner.png',
+  alt: 'World Best — lowest strokes win',
+  decoding: 'async',
+});
 const lbTitle = el('h2', { text: 'All-time leaderboard', style: 'margin:0' });
 const lbNote = el('p', {
   class: 'hint lb-note',
@@ -359,7 +397,7 @@ const lbNote = el('p', {
 });
 const lbBody = el('div', { class: 'leaderboard-list', id: 'leaderboard-list' });
 const lbCloseBtn = el('button', { class: 'btn accent', type: 'button', text: 'Close' });
-lbCard.append(lbTitle, lbNote, lbBody, lbCloseBtn);
+lbCard.append(lbBanner, lbTitle, lbNote, lbBody, lbCloseBtn);
 leaderboardOverlay.append(lbCard);
 
 // ---- State ----
@@ -522,6 +560,8 @@ function updateHolePlaque(force = false): void {
     plaqueTitle.textContent = hole.name;
     plaquePar.textContent = parText;
     plaqueLength.textContent = lengthText;
+    plaqueBadge.src = `./hole-badges/${n}.png`;
+    plaqueBadge.alt = `Hole ${n} badge`;
 
     plaqueBestList.replaceChildren();
     if (top.length === 0) {
@@ -826,12 +866,14 @@ async function renderLeaderboardList(): Promise<void> {
 }
 
 function openLeaderboard(): void {
+  leaderboardOverlay.classList.add('sparkle-win');
   leaderboardOverlay.classList.remove('hidden');
   void renderLeaderboardList();
 }
 
 function closeLeaderboard(): void {
   leaderboardOverlay.classList.add('hidden');
+  leaderboardOverlay.classList.remove('sparkle-win');
 }
 
 function beginRoundScoreToken(): void {
@@ -884,7 +926,19 @@ function openScorecard(final: boolean): void {
   head.append(el('th', { text: 'Player' }));
   for (let i = 0; i <= holeIndex; i++) {
     const hn = HOLES[i]?.name ?? `Hole ${i + 1}`;
-    head.append(el('th', { text: String(i + 1), title: hn }));
+    const th = el('th', { class: 'score-hole-th', title: hn });
+    const badge = el('img', {
+      class: 'score-hole-badge',
+      src: `./hole-badges/${i + 1}.png`,
+      alt: '',
+      width: '28',
+      height: '28',
+      decoding: 'async',
+      'aria-hidden': 'true',
+    });
+    const num = el('span', { class: 'score-hole-num', text: String(i + 1) });
+    th.append(badge, num);
+    head.append(th);
   }
   head.append(el('th', { text: 'Tot' }));
   head.append(el('th', { text: '+/−', title: 'Score relative to par' }));
@@ -948,6 +1002,7 @@ function openScorecard(final: boolean): void {
     nextHoleBtn.textContent = 'Next Hole';
     nextHoleBtn.disabled = !solo && !isHost;
     scoreMenuBtn.textContent = 'Main Menu';
+    scoreOverlay.classList.remove('sparkle-win');
   } else {
     // End of 9 — stop and ask for another round (don't auto-continue)
     phase = 'round-done';
@@ -961,6 +1016,7 @@ function openScorecard(final: boolean): void {
     const me = localPlayer();
     const localTotal = me?.totalStrokes ?? 0;
     considerTipsAfterRoundComplete(localTotal);
+    scoreOverlay.classList.add('sparkle-win');
   }
   scoreOverlay.classList.remove('hidden');
 }
