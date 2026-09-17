@@ -1,4 +1,5 @@
 import type { CourseProp, GrassPattern, HoleDef, PlayerInfo, Ramp, Vec2, Zone } from '../types';
+import type { LeaderboardEntry } from '../leaderboard';
 import { BALL_RADIUS } from '../physics/world';
 import { len } from '../physics/math';
 import { THEMES, type HoleTheme } from '../levels/themes';
@@ -17,7 +18,7 @@ const WATER = '#2a7aad';
 const CUP_DARK = '#0a0a0a';
 
 /** World-space padding around the playable green for themed surroundings. */
-export const THEME_PAD = 72;
+export const THEME_PAD = 160;
 
 export type AimPreview = {
   from: Vec2;
@@ -85,6 +86,7 @@ export class Renderer {
     aim: AimPreview,
     highlightId: string | null,
     showGreenMap = false,
+    holeScores: LeaderboardEntry[] = [],
   ): void {
     const ctx = this.ctx;
     const theme = THEMES[hole.theme] ?? THEMES.tropical;
@@ -120,8 +122,8 @@ export class Renderer {
     // Large wind key outside the putting green (always, including 0 mph)
     drawWindKey(ctx, hole, green, pad);
 
-    // Hole plaque outside the green (number, name, par, length)
-    drawHolePlaque(ctx, hole, green, pad);
+    // Huge hole plaque outside the green (info + worldwide hole leaderboard)
+    drawHolePlaque(ctx, hole, green, pad, holeScores);
 
     // Ramps (under zones visually but readable)
     for (const ramp of hole.ramps ?? []) drawRamp(ctx, ramp);
@@ -180,14 +182,7 @@ export class Renderer {
         ctx.ellipse(p.ball.x, p.ball.y + 2, r * (1.15 - hop * 0.35), r * 0.5, 0, 0, Math.PI * 2);
         ctx.fill();
       }
-      const g = ctx.createRadialGradient(drawX - 3, drawY - 3, 1, drawX, drawY, r);
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, p.color);
-      g.addColorStop(1, shade(p.color, -40));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(drawX, drawY, r * (1 + hop * 0.18), 0, Math.PI * 2);
-      ctx.fill();
+      drawGolfBall(ctx, drawX, drawY, r * (1 + hop * 0.18), p.color);
       if (highlightId === p.id) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2.5;
@@ -212,7 +207,10 @@ export class Renderer {
     for (const p of players) {
       const speed = len(p.vel);
       if (speed < 0.5 || p.sunk) continue;
-      ctx.strokeStyle = `${p.color}55`;
+      ctx.strokeStyle =
+        p.color === 'galactic' || p.color === '#galactic'
+          ? 'rgba(140,100,255,0.35)'
+          : `${p.color}55`;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(p.ball.x, p.ball.y);
@@ -1499,57 +1497,176 @@ function drawHolePlaque(
   hole: HoleDef,
   green: Vec2[],
   pad: number,
+  scores: LeaderboardEntry[] = [],
 ): void {
   const { minX, minY, maxX, maxY } = polyBounds(green);
-  // Prefer left pad, mid-height — clearly outside green
-  let x = Math.max(-pad + 8, minX - 118);
-  let y = Math.min(Math.max(minY + 20, 40), maxY - 80);
-  x = Math.max(-pad + 6, Math.min(hole.width + pad - 130, x));
-  y = Math.max(-pad + 10, Math.min(hole.height + pad - 100, y));
+  const topN = Math.min(8, Math.max(scores.length, 0));
+  const headerH = 108;
+  const rowH = 18;
+  const listH = 22 + topN * rowH + (topN === 0 ? 18 : 8);
+  const boxW = 210;
+  const boxH = headerH + listH;
 
-  const boxW = 122;
-  const boxH = 86;
+  // Prefer left pad, mid-height — clearly outside putting green
+  let x = Math.max(-pad + 10, minX - boxW - 16);
+  let y = Math.min(Math.max(minY + 8, -pad + 14), maxY - boxH * 0.35);
+  // If left is cramped, try right pad
+  if (x < -pad + 8) {
+    x = Math.min(hole.width + pad - boxW - 10, maxX + 16);
+  }
+  x = Math.max(-pad + 8, Math.min(hole.width + pad - boxW - 8, x));
+  y = Math.max(-pad + 10, Math.min(hole.height + pad - boxH - 10, y));
+
   ctx.save();
   // Post
-  ctx.fillStyle = '#5c4033';
-  ctx.fillRect(x + boxW / 2 - 4, y + boxH - 4, 8, 22);
+  ctx.fillStyle = '#4a3224';
+  ctx.fillRect(x + boxW / 2 - 6, y + boxH - 2, 12, 28);
   // Plaque body
   const g = ctx.createLinearGradient(x, y, x, y + boxH);
-  g.addColorStop(0, '#f0e6d0');
-  g.addColorStop(1, '#d4c4a0');
+  g.addColorStop(0, '#f7ecd4');
+  g.addColorStop(0.55, '#e8d7b0');
+  g.addColorStop(1, '#d2be90');
   ctx.fillStyle = g;
-  roundRect(ctx, x, y, boxW, boxH, 8);
+  roundRect(ctx, x, y, boxW, boxH, 12);
   ctx.fill();
   ctx.strokeStyle = '#8b6914';
-  ctx.lineWidth = 3;
-  roundRect(ctx, x, y, boxW, boxH, 8);
+  ctx.lineWidth = 4;
+  roundRect(ctx, x, y, boxW, boxH, 12);
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, x + 4, y + 4, boxW - 8, boxH - 8, 5);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  roundRect(ctx, x + 5, y + 5, boxW - 10, boxH - 10, 8);
   ctx.stroke();
 
-  ctx.fillStyle = '#3a2a14';
+  const cx = x + boxW / 2;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 12px system-ui,sans-serif';
-  ctx.fillText(`HOLE ${hole.id}`, x + boxW / 2, y + 16);
-  ctx.font = 'bold 13px system-ui,sans-serif';
-  // Wrap name if long
+
+  ctx.fillStyle = '#5a3a12';
+  ctx.font = '800 15px system-ui,sans-serif';
+  ctx.fillText(`HOLE ${hole.id}`, cx, y + 22);
+
+  ctx.fillStyle = '#1a1008';
+  let nameFont = '800 18px system-ui,sans-serif';
+  ctx.font = nameFont;
   const name = hole.name;
-  ctx.font = '700 12px system-ui,sans-serif';
-  ctx.fillStyle = '#1a1208';
-  if (ctx.measureText(name).width > boxW - 12) {
-    ctx.font = '700 10px system-ui,sans-serif';
+  if (ctx.measureText(name).width > boxW - 20) {
+    nameFont = '800 14px system-ui,sans-serif';
+    ctx.font = nameFont;
   }
-  ctx.fillText(name, x + boxW / 2, y + 36);
-  ctx.font = '600 12px system-ui,sans-serif';
-  ctx.fillStyle = '#4a3520';
-  ctx.fillText(`Par ${hole.par}`, x + boxW / 2, y + 54);
-  ctx.font = '600 11px system-ui,sans-serif';
-  ctx.fillStyle = '#5a4530';
-  ctx.fillText(`${hole.lengthFeet} ft`, x + boxW / 2, y + 72);
+  ctx.fillText(name, cx, y + 46);
+
+  ctx.font = '700 15px system-ui,sans-serif';
+  ctx.fillStyle = '#3a2810';
+  ctx.fillText(`Par ${hole.par}  ·  ${hole.lengthFeet} ft`, cx, y + 72);
+
+  // Divider
+  ctx.strokeStyle = 'rgba(90, 60, 20, 0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x + 14, y + headerH - 6);
+  ctx.lineTo(x + boxW - 14, y + headerH - 6);
+  ctx.stroke();
+
+  ctx.font = '800 12px system-ui,sans-serif';
+  ctx.fillStyle = '#6b4510';
+  ctx.fillText('WORLD BEST', cx, y + headerH + 10);
+
+  const listTop = y + headerH + 26;
+  if (topN === 0) {
+    ctx.font = '600 12px system-ui,sans-serif';
+    ctx.fillStyle = '#7a6040';
+    ctx.fillText('No scores yet — sink it!', cx, listTop + 6);
+  } else {
+    ctx.textAlign = 'left';
+    for (let i = 0; i < topN; i++) {
+      const e = scores[i]!;
+      const rowY = listTop + i * rowH;
+      const rankCol = x + 14;
+      const nameCol = x + 36;
+      const scoreCol = x + boxW - 16;
+      ctx.font = '700 12px system-ui,sans-serif';
+      ctx.fillStyle = i === 0 ? '#8b6914' : '#4a3520';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(e.rank), rankCol, rowY);
+      const nm = e.name.length > 12 ? e.name.slice(0, 11) + '…' : e.name;
+      ctx.font = '600 12px system-ui,sans-serif';
+      ctx.fillStyle = '#1a1208';
+      ctx.fillText(nm, nameCol, rowY);
+      ctx.textAlign = 'right';
+      ctx.font = '800 13px system-ui,sans-serif';
+      ctx.fillStyle = '#2a1a08';
+      ctx.fillText(String(e.score), scoreCol, rowY);
+    }
+  }
+
   ctx.restore();
+}
+
+function drawGolfBall(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  color: string,
+): void {
+  if (color === 'galactic' || color === '#galactic') {
+    // Dark cosmic base
+    const base = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+    base.addColorStop(0, '#3a2a6a');
+    base.addColorStop(0.45, '#1a1040');
+    base.addColorStop(1, '#050510');
+    ctx.fillStyle = base;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nebula sheen
+    const neb = ctx.createRadialGradient(x + r * 0.2, y - r * 0.15, 0, x, y, r * 0.95);
+    neb.addColorStop(0, 'rgba(180, 80, 255, 0.55)');
+    neb.addColorStop(0.35, 'rgba(40, 160, 255, 0.28)');
+    neb.addColorStop(0.7, 'rgba(255, 60, 140, 0.12)');
+    neb.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = neb;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stars (deterministic-ish from position)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.clip();
+    const seed = Math.abs((x * 12.9898 + y * 78.233) % 1);
+    for (let i = 0; i < 10; i++) {
+      const a = seed * 6.28 + i * 2.399;
+      const d = r * (0.25 + ((i * 37) % 10) / 14);
+      const sx = x + Math.cos(a) * d;
+      const sy = y + Math.sin(a * 1.3) * d * 0.9;
+      const sr = 0.45 + (i % 3) * 0.25;
+      ctx.fillStyle = i % 4 === 0 ? 'rgba(180,220,255,0.95)' : 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Specular rim
+    ctx.strokeStyle = 'rgba(160, 200, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(x, y, r - 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  const g = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, r);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.35, color);
+  g.addColorStop(1, shade(color, -40));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawRamp(ctx: CanvasRenderingContext2D, ramp: Ramp): void {

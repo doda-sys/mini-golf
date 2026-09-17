@@ -510,3 +510,78 @@ label {
 #leaderboard-overlay {
   z-index: 18;
 }
+
+/* ---- Ball color picker (start menu) ---- */
+.ball-color-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ball-color-btn {
+  appearance: none;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.12s, transform 0.12s, background 0.12s;
+}
+
+.ball-color-btn:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.ball-color-btn.selected {
+  border-color: var(--accent2);
+  background: rgba(255, 202, 58, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 202, 58, 0.35);
+}
+
+.ball-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  box-shadow: inset -3px -3px 6px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.ball-swatch-white {
+  background: radial-gradient(circle at 30% 30%, #fff, #e8e8e8 55%, #c8c8c8);
+}
+
+.ball-swatch-highlighter {
+  background: radial-gradient(circle at 30% 30%, #f5ff9a, #d6ff00 50%, #a8c800);
+}
+
+.ball-swatch-pink {
+  background: radial-gradient(circle at 30% 30%, #ffd0ea, #ff6eb4 50%, #d44090);
+}
+
+.ball-swatch-galactic {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle at 70% 60%, rgba(180, 220, 255, 0.95) 0 1px, transparent 2px),
+    radial-gradient(circle at 45% 75%, rgba(255, 255, 255, 0.7) 0 0.8px, transparent 1.5px),
+    radial-gradient(circle at 60% 30%, rgba(180, 80, 255, 0.55), transparent 45%),
+    radial-gradient(circle at 35% 65%, rgba(40, 160, 255, 0.4), transparent 40%),
+    radial-gradient(circle at 40% 35%, #3a2a6a, #1a1040 55%, #050510);
+}
+
+.ball-swatch-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.15;
+}
+
+.ball-color-btn.selected .ball-swatch-label {
+  color: var(--text);
+}

@@ -15,14 +15,51 @@ import type { GameMode, NetMessage, PlayerInfo, Vec2 } from './types';
 import { len } from './physics/math';
 import {
   ensureScoreToken,
+  ensureHoleScoreToken,
   fetchLeaderboard,
+  fetchHoleLeaderboard,
   formatVsPar as lbFormatVsPar,
   recordScoreCheckin,
   submitRoundScore,
+  submitHoleScore,
   vsParForScore,
+  type LeaderboardEntry,
 } from './leaderboard';
 
 const COLORS = PLAYER_COLORS;
+
+type BallStyleId = 'white' | 'highlighter' | 'pink' | 'galactic';
+
+const BALL_STYLES: { id: BallStyleId; label: string; color: string }[] = [
+  { id: 'white', label: 'White', color: '#f5f5f5' },
+  { id: 'highlighter', label: 'Highlighter yellow', color: '#d6ff00' },
+  { id: 'pink', label: 'Pink', color: '#ff6eb4' },
+  { id: 'galactic', label: 'Galactic', color: 'galactic' },
+];
+
+const BALL_STYLE_KEY = 'mg-ball-style';
+
+function loadBallStyle(): BallStyleId {
+  const v = localStorage.getItem(BALL_STYLE_KEY);
+  if (v === 'white' || v === 'highlighter' || v === 'pink' || v === 'galactic') return v;
+  return 'white';
+}
+
+function ballColorFromStyle(id: BallStyleId): string {
+  return BALL_STYLES.find((s) => s.id === id)?.color ?? '#f5f5f5';
+}
+
+function chipBackground(color: string): string {
+  if (color === 'galactic' || color === '#galactic') {
+    return 'linear-gradient(135deg, #1a1040 0%, #a050ff 45%, #2080ff 100%)';
+  }
+  return color;
+}
+
+function isValidBallColor(color: string): boolean {
+  if (color === 'galactic' || color === '#galactic') return true;
+  return /^#[0-9a-fA-F]{6}$/.test(color);
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -67,6 +104,38 @@ const nameInput = el('input', {
   autocomplete: 'nickname',
 });
 nameInput.value = localStorage.getItem('mg-name') || randomName();
+
+let selectedBallStyle: BallStyleId = loadBallStyle();
+const ballColorLabel = el('label', { text: 'Ball color' });
+const ballColorRow = el('div', { class: 'ball-color-row', role: 'radiogroup', 'aria-label': 'Ball color' });
+const ballColorButtons: HTMLButtonElement[] = [];
+for (const style of BALL_STYLES) {
+  const btn = el('button', {
+    type: 'button',
+    class: `ball-color-btn${style.id === selectedBallStyle ? ' selected' : ''}`,
+    title: style.label,
+    'aria-label': style.label,
+    'data-style': style.id,
+  }) as HTMLButtonElement;
+  btn.setAttribute('role', 'radio');
+  btn.setAttribute('aria-checked', style.id === selectedBallStyle ? 'true' : 'false');
+  const swatch = el('span', { class: `ball-swatch ball-swatch-${style.id}` });
+  const caption = el('span', { class: 'ball-swatch-label', text: style.label });
+  btn.append(swatch, caption);
+  btn.addEventListener('click', () => {
+    selectedBallStyle = style.id;
+    localStorage.setItem(BALL_STYLE_KEY, style.id);
+    for (const b of ballColorButtons) {
+      const sid = b.getAttribute('data-style');
+      const on = sid === selectedBallStyle;
+      b.classList.toggle('selected', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+  });
+  ballColorButtons.push(btn);
+  ballColorRow.append(btn);
+}
+
 const soloBtn = el('button', { class: 'btn accent', type: 'button', text: 'Play Solo' });
 const createBtn = el('button', { class: 'btn', type: 'button', text: 'Create Room' });
 const leaderboardMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
@@ -85,6 +154,8 @@ const menuError = el('div', { class: 'error' });
 menuCard.append(
   el('label', { text: 'Player name', for: 'player-name' }),
   nameInput,
+  ballColorLabel,
+  ballColorRow,
   soloBtn,
   createBtn,
   el('label', { text: 'Join with code' }),
@@ -161,8 +232,12 @@ let solo = true;
 let isHost = false;
 let localId = 'local';
 let localName = nameInput.value;
-let localColor = COLORS[0];
+let localColor = ballColorFromStyle(selectedBallStyle);
 let holeIndex = 0;
+/** Worldwide top scores for the current hole plaque. */
+let holePlaqueScores: LeaderboardEntry[] = [];
+/** Avoid double-posting the same hole sink. */
+let holeScorePostedForIndex = -1;
 let players: PlayerInfo[] = [];
 let balls = new Map<string, BallState>();
 let turnPlayerId = localId;
@@ -249,7 +324,7 @@ function startSolo(): void {
   isHost = true;
   localId = 'local';
   localName = playerName();
-  localColor = COLORS[0];
+  localColor = selectedPlayerColor();
   dealCourse();
   holeIndex = 0;
   leaderboardSavedThisRound = false;
@@ -263,6 +338,7 @@ function startSolo(): void {
   roomPill.classList.add('hidden');
   showScreen('game');
   layout();
+  beginHoleScoreToken();
   input.enabled = true;
   showToast('Drag from the ball to aim · release to putt');
 }
@@ -336,7 +412,7 @@ function updateHud(): void {
     ...players.map((p) => {
       const chip = el('div', { class: `player-chip${p.id === turnPlayerId ? ' active' : ''}` });
       const dot = el('span', { class: 'dot' });
-      dot.style.background = p.color;
+      applyChipDot(dot, p.color);
       const hs = holeStrokes.get(p.id) ?? 0;
       chip.append(dot, document.createTextNode(`${p.name} (${hs})`));
       return chip;
@@ -378,6 +454,9 @@ function onHoleSunk(playerId: string): void {
   p.strokes[holeIndex] = st;
   p.totalStrokes = p.strokes.reduce((a, b) => a + (b || 0), 0);
   showToast(`${p.name} sunk it in ${st}!`);
+  if (playerId === localId) {
+    postLocalHoleScore(st);
+  }
 
   if (everyoneFinished()) {
     phase = 'hole-done';
@@ -508,6 +587,43 @@ function beginRoundScoreToken(): void {
   void ensureScoreToken();
 }
 
+function beginHoleScoreToken(): void {
+  const holeNum = getHole(holeIndex).id;
+  holeScorePostedForIndex = -1;
+  void ensureHoleScoreToken(holeNum);
+  void refreshHolePlaqueScores();
+}
+
+async function refreshHolePlaqueScores(): Promise<void> {
+  const holeNum = getHole(holeIndex).id;
+  const entries = await fetchHoleLeaderboard(holeNum);
+  // Ignore stale responses if the player advanced holes
+  if (getHole(holeIndex).id !== holeNum) return;
+  holePlaqueScores = entries;
+}
+
+function selectedPlayerColor(): string {
+  return ballColorFromStyle(selectedBallStyle);
+}
+
+function applyChipDot(dot: HTMLElement, color: string): void {
+  dot.style.background = chipBackground(color);
+}
+
+function postLocalHoleScore(strokes: number): void {
+  if (holeScorePostedForIndex === holeIndex) return;
+  if (!(strokes >= 1 && strokes <= 15)) return;
+  holeScorePostedForIndex = holeIndex;
+  const holeNum = getHole(holeIndex).id;
+  const name = localPlayer()?.name || playerName();
+  void (async () => {
+    const ok = await submitHoleScore(holeNum, name, strokes);
+    if (ok) {
+      await refreshHolePlaqueScores();
+    }
+  })();
+}
+
 function openScorecard(final: boolean): void {
   recordScoreCheckin();
   scoreTitle.textContent = final ? 'Final Scores' : `Hole ${holeIndex + 1} Complete`;
@@ -605,6 +721,7 @@ function startAnotherNine(): void {
   mode = 'playing';
   scoreOverlay.classList.add('hidden');
   layout();
+  beginHoleScoreToken();
   updateHud();
   if (!solo && isHost && net) {
     net.broadcast({
@@ -630,6 +747,7 @@ function goNextHole(): void {
   turnPlayerId = players[0]?.id ?? localId;
   phase = 'aiming';
   layout();
+  beginHoleScoreToken();
   updateHud();
   if (!solo && isHost) {
     net?.broadcast({
@@ -706,7 +824,7 @@ function renderLobbyPlayers(): void {
     ...players.map((p) => {
       const row = el('div', { class: 'player-chip', style: 'margin:4px 0' });
       const dot = el('span', { class: 'dot' });
-      dot.style.background = p.color;
+      applyChipDot(dot, p.color);
       row.append(dot, document.createTextNode(p.name + (p.id === localId ? ' (you)' : '') + (isHost && p.id === localId ? ' · host' : '')));
       return row;
     }),
@@ -749,7 +867,9 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
   switch (msg.type) {
     case 'hello': {
       if (!isHost) return;
-      const color = COLORS[players.length % COLORS.length];
+      const color = isValidBallColor(msg.color)
+        ? msg.color
+        : COLORS[players.length % COLORS.length];
       const p = makePlayer(fromId, msg.name || 'Guest', color, getHole(holeIndex).tee);
       players.push(p);
       balls.set(fromId, createBall(getHole(holeIndex).tee));
@@ -829,6 +949,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       roomPill.classList.remove('hidden');
       roomPill.textContent = roomCode;
       layout();
+      beginHoleScoreToken();
       updateHud();
       showToast('Round started!');
       break;
@@ -877,6 +998,7 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       phase = 'aiming';
       scoreOverlay.classList.add('hidden');
       layout();
+      beginHoleScoreToken();
       updateHud();
       showToast(`Hole ${holeIndex + 1}: ${getHole(holeIndex).name}`);
       break;
@@ -901,7 +1023,7 @@ async function createRoom(): Promise<void> {
     roomCode = await net.createRoom(generateRoomCode(5));
     isHost = true;
     localId = net.localPeerId;
-    localColor = COLORS[0];
+    localColor = selectedPlayerColor();
     holeIndex = 0;
     players = [makePlayer(localId, localName, localColor, getHole(0).tee)];
     balls.clear();
@@ -939,7 +1061,8 @@ async function joinRoom(): Promise<void> {
     localId = net.localPeerId;
     mode = 'lobby';
     lobbyCode.textContent = roomCode;
-    net.send({ type: 'hello', name: localName, color: COLORS[1] });
+    localColor = selectedPlayerColor();
+    net.send({ type: 'hello', name: localName, color: localColor });
     renderLobbyPlayers();
     showScreen('lobby');
     showToast(`Joined ${roomCode}`);
@@ -969,6 +1092,7 @@ function startMultiplayerRound(): void {
   roomPill.classList.remove('hidden');
   roomPill.textContent = roomCode;
   layout();
+  beginHoleScoreToken();
   updateHud();
   net?.broadcast({ type: 'start', holeIndex, turnPlayerId, holeIds: ids, courseSeed });
   showToast('Round started!');
@@ -1082,7 +1206,7 @@ function tick(ts: number): void {
       : null;
 
   input.enabled = isMyTurn();
-  renderer.draw(hole, players, localId, aimPreview, turnPlayerId, showGreenMap);
+  renderer.draw(hole, players, localId, aimPreview, turnPlayerId, showGreenMap, holePlaqueScores);
   updateHud();
 }
 

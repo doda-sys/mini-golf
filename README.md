@@ -28,8 +28,9 @@ Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent
 4. Hit **ramps** with enough speed/aim to jump gaps — failed landings splash or reset fairly.
 5. Watch the large on-course **WIND** key (compass + **0–25 mph**) — secondary to green break.
 6. Toggle **Green Map / Topo** for StrackaLine-style contours, downhill ticks, and elevation heatmap (**same height field as physics**).
-7. Read the **hole plaque** (outside the green): number, name, par, length in feet.
-8. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
+7. Read the large **hole plaque** (outside the green): number, name, par, length, plus a **worldwide per-hole leaderboard** (best strokes on that hole).
+8. Pick your **ball color** on the start menu (White / Highlighter yellow / Pink / Galactic) — saved for next time.
+9. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
 
 ### Solo
 
