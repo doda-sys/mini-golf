@@ -1,4 +1,4 @@
-# Putt-Putt Mini Golf ⛳
+# Fooze n Froops Mini Golf ⛳
 
 Browser-based top-down miniature golf — solo offline play or real-time multiplayer with short room codes. Built with **Vite + TypeScript + HTML Canvas** and **Trystero** (BitTorrent tracker signaling) for peer-to-peer sync. No accounts, no paid backend.
 

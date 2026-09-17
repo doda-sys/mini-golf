@@ -13,6 +13,11 @@ export const CUP_RESIDENCE_FRAMES = 8;
 export const CUP_DAMP = 0.82;
 /** Max fraction of cup radius for "deep" residence capture. */
 export const CUP_DEEP_FRAC = 0.9;
+/**
+ * Wind acceleration scale. hole.wind is roughly 0–1.2 magnitude;
+ * applied as gentle accel only while the ball is moving.
+ */
+export const WIND_ACCEL = 0.018;
 
 export type BallState = {
   pos: Vec2;
@@ -31,7 +36,6 @@ function circleAabbResolve(cx: number, cy: number, r: number, wall: Wall): Vec2 
   const dy = cy - nearestY;
   const d2 = dx * dx + dy * dy;
   if (d2 >= r * r || d2 === 0) {
-    // Fully inside thick wall: push out to nearest edge
     if (
       cx > wall.x &&
       cx < wall.x + wall.w &&
@@ -77,7 +81,6 @@ function collideBumper(ball: BallState, b: Bumper): void {
   if (d >= minD || d < 1e-6) return;
   const n = scale(sub(ball.pos, { x: b.x, y: b.y }), 1 / d);
   ball.pos = add({ x: b.x, y: b.y }, scale(n, minD + 0.5));
-  // Boost bounce off bumper
   const incoming = Math.max(2, -dot(ball.vel, n));
   ball.vel = add(sub(ball.vel, scale(n, 2 * Math.min(0, -incoming))), scale(n, incoming * 0.55));
   const speed = len(ball.vel);
@@ -91,6 +94,113 @@ function collideWalls(ball: BallState, walls: Wall[]): void {
     ball.pos = add(ball.pos, push);
     ball.vel = reflectVelocity(ball.vel, push);
   }
+}
+
+function pointInPoly(px: number, py: number, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function closestOnSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): Vec2 {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const ab2 = abx * abx + aby * aby || 1;
+  let t = ((px - ax) * abx + (py - ay) * aby) / ab2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: ax + abx * t, y: ay + aby * t };
+}
+
+/**
+ * Keep the ball inside the green polygon by colliding with boundary edges.
+ * Push is along the inward normal of the nearest edge.
+ */
+function collideGreenBoundary(ball: BallState, green: Vec2[]): void {
+  if (green.length < 3) return;
+  const r = ball.radius;
+  const cx = ball.pos.x;
+  const cy = ball.pos.y;
+  const inside = pointInPoly(cx, cy, green);
+
+  let bestD = Infinity;
+  let bestNx = 0;
+  let bestNy = 0;
+  let bestOverlap = 0;
+
+  for (let i = 0; i < green.length; i++) {
+    const a = green[i];
+    const b = green[(i + 1) % green.length];
+    const c = closestOnSeg(cx, cy, a.x, a.y, b.x, b.y);
+    const dx = cx - c.x;
+    const dy = cy - c.y;
+    const d = Math.hypot(dx, dy);
+
+    // Edge tangent → outward candidate (perp). Pick inward via centroid test.
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    let nx = -ey;
+    let ny = ex;
+    const nl = Math.hypot(nx, ny) || 1;
+    nx /= nl;
+    ny /= nl;
+    // Midpoint + normal should go toward outside; flip if midpoint+normal is still inside.
+    const mx = (a.x + b.x) / 2 + nx * 2;
+    const my = (a.y + b.y) / 2 + ny * 2;
+    if (pointInPoly(mx, my, green)) {
+      nx = -nx;
+      ny = -ny;
+    }
+    // Inward normal is opposite of outward
+    const inx = -nx;
+    const iny = -ny;
+
+    if (!inside) {
+      // Outside: push toward closest edge along inward direction
+      if (d < bestD) {
+        bestD = d;
+        bestNx = inx;
+        bestNy = iny;
+        bestOverlap = d + r;
+      }
+    } else if (d < r && d < bestD) {
+      bestD = d;
+      bestNx = inx;
+      bestNy = iny;
+      bestOverlap = r - d;
+    }
+  }
+
+  if (bestOverlap <= 0 || !Number.isFinite(bestOverlap)) return;
+
+  // If outside, move onto edge then inset by radius
+  if (!inside) {
+    // Find closest edge point and place ball inside
+    let nearest = { x: cx, y: cy };
+    let nd = Infinity;
+    for (let i = 0; i < green.length; i++) {
+      const a = green[i];
+      const b = green[(i + 1) % green.length];
+      const c = closestOnSeg(cx, cy, a.x, a.y, b.x, b.y);
+      const d = Math.hypot(cx - c.x, cy - c.y);
+      if (d < nd) {
+        nd = d;
+        nearest = c;
+      }
+    }
+    ball.pos = { x: nearest.x + bestNx * (r + 0.5), y: nearest.y + bestNy * (r + 0.5) };
+    ball.vel = reflectVelocity(ball.vel, { x: bestNx, y: bestNy });
+    return;
+  }
+
+  ball.pos = add(ball.pos, scale({ x: bestNx, y: bestNy }, bestOverlap + 0.15));
+  ball.vel = reflectVelocity(ball.vel, { x: bestNx, y: bestNy });
 }
 
 /**
@@ -112,18 +222,14 @@ function applyCupCapture(ball: BallState, hole: HoleDef): boolean {
     return false;
   }
 
-  // Inside cup: damp kinetic energy hard (prevents slingshot/overshoot).
   ball.vel = scale(ball.vel, CUP_DAMP);
 
-  // Attract only toward cup center without increasing speed.
   if (toCup > 0.15) {
     const toward = scale(sub(hole.cup, ball.pos), 1 / toCup);
     const radial = Math.max(0, dot(ball.vel, toward));
     const tangent = sub(ball.vel, scale(toward, radial));
-    // Bleed tangential speed; keep radial-in component; nudge inward gently.
     const nudge = Math.min(0.35, toCup * 0.12);
     const newVel = add(scale(tangent, 0.55), scale(toward, radial + nudge));
-    // Energy-safe: never exceed pre-nudge speed after damp.
     const maxSpeed = len(ball.vel) + 1e-6;
     const nv = len(newVel);
     ball.vel = nv > maxSpeed ? scale(newVel, maxSpeed / nv) : newVel;
@@ -131,7 +237,6 @@ function applyCupCapture(ball: BallState, hole: HoleDef): boolean {
 
   const speed = len(ball.vel);
 
-  // Residence timer while deep in the cup.
   if (toCup < deepR) {
     ball.cupResidence = (ball.cupResidence ?? 0) + 1;
   } else {
@@ -171,31 +276,25 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
 
   const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
   const h = dt / steps;
+  const green = hole.green?.length >= 3 ? hole.green : [
+    { x: 0, y: 0 },
+    { x: hole.width, y: 0 },
+    { x: hole.width, y: hole.height },
+    { x: 0, y: hole.height },
+  ];
 
   for (let i = 0; i < steps; i++) {
     if (ball.sunk) return;
 
+    // Wind only while moving (so aiming stays fair)
+    const speedBefore = len(ball.vel);
+    if (speedBefore > MIN_SPEED && (hole.wind.x !== 0 || hole.wind.y !== 0)) {
+      ball.vel = add(ball.vel, scale(hole.wind, WIND_ACCEL * h * 60));
+    }
+
     ball.pos = add(ball.pos, scale(ball.vel, h * 60));
 
-    // Bounds as soft walls (course border is in walls usually)
-    const margin = ball.radius;
-    if (ball.pos.x < margin) {
-      ball.pos.x = margin;
-      ball.vel.x = Math.abs(ball.vel.x) * 0.72;
-    }
-    if (ball.pos.x > hole.width - margin) {
-      ball.pos.x = hole.width - margin;
-      ball.vel.x = -Math.abs(ball.vel.x) * 0.72;
-    }
-    if (ball.pos.y < margin) {
-      ball.pos.y = margin;
-      ball.vel.y = Math.abs(ball.vel.y) * 0.72;
-    }
-    if (ball.pos.y > hole.height - margin) {
-      ball.pos.y = hole.height - margin;
-      ball.vel.y = -Math.abs(ball.vel.y) * 0.72;
-    }
-
+    collideGreenBoundary(ball, green);
     collideWalls(ball, hole.walls);
     for (const bumper of hole.bumpers) collideBumper(ball, bumper);
 
@@ -203,7 +302,6 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
     let friction = FRICTION;
     if (zone) {
       if (zone.kind === 'water') {
-        // Reset toward tee gently — treat as hazard bounce back
         ball.pos = { x: hole.tee.x, y: hole.tee.y };
         ball.vel = { x: 0, y: 0 };
         ball.hazard = true;

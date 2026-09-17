@@ -199,6 +199,13 @@ label {
   border: 1px solid var(--accent);
 }
 
+.hud-pill.wind {
+  background: rgba(100, 180, 255, 0.18);
+  border: 1px solid rgba(140, 200, 255, 0.45);
+  color: #cfefff;
+  font-variant-numeric: tabular-nums;
+}
+
 .hud-pill.room {
   font-family: ui-monospace, monospace;
   letter-spacing: 0.12em;

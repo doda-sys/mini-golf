@@ -34,12 +34,24 @@ export type HoleThemeId =
   | 'castle'
   | 'candy';
 
+/** Deterministic grass look — same hole id ⇒ same pattern in multiplayer. */
+export type GrassPattern =
+  | { kind: 'checker'; tile: number; a: string; b: string }
+  | { kind: 'stripes'; width: number; angle: number; a: string; b: string }
+  | { kind: 'diamonds'; size: number; a: string; b: string }
+  | { kind: 'noise'; scale: number; a: string; b: string; c: string }
+  | { kind: 'rings'; spacing: number; a: string; b: string }
+  | { kind: 'mow'; width: number; angle: number; a: string; b: string };
+
 export type HoleDef = {
   id: number;
   name: string;
   par: number;
+  /** Axis-aligned bounds used for camera / layout (green polygon lives inside). */
   width: number;
   height: number;
+  /** Playable green outline (closed polygon, world coords). Ball stays inside. */
+  green: Vec2[];
   tee: Vec2;
   cup: Vec2;
   cupRadius: number;
@@ -48,6 +60,13 @@ export type HoleDef = {
   zones: Zone[];
   /** Visual theme for surroundings outside the green */
   theme: HoleThemeId;
+  /** Grass fill style (deterministic from hole id). */
+  grass: GrassPattern;
+  /**
+   * Per-hole wind acceleration (world units / second²-ish, applied while moving).
+   * Deterministic from hole id so multiplayer stays in sync without net messages.
+   */
+  wind: Vec2;
 };
 
 export type PlayerInfo = {

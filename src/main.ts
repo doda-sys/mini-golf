@@ -1,5 +1,6 @@
 import './style.css';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, POOL_SIZE, ROUND_HOLES } from './levels/holes';
+import { windStrength } from './levels/generate';
 import { Renderer } from './game/renderer';
 import { InputController } from './game/input';
 import {
@@ -44,7 +45,7 @@ app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, toast);
 // Menu
 menuScreen.append(
   el('div', { id: 'menu-decor', text: '⛳' }),
-  el('h1', { class: 'logo' }, ['Putt-Putt ', el('span', { text: 'Mini Golf' })]),
+  el('h1', { class: 'logo' }, ['Fooze n Froops ', el('span', { text: 'Mini Golf' })]),
   el('p', { class: 'tagline', text: `Solo or multiplayer · ${ROUND_HOLES} holes · from ${POOL_SIZE} · drag to aim` }),
 );
 
@@ -103,11 +104,12 @@ lobbyScreen.append(lobbyCard);
 const hud = el('div', { id: 'hud' });
 const holePill = el('div', { class: 'hud-pill', text: 'Hole 1' });
 const strokesPill = el('div', { class: 'hud-pill', text: 'Strokes 0' });
+const windPill = el('div', { class: 'hud-pill wind', id: 'wind-pill', text: 'Wind —' });
 const turnPill = el('div', { class: 'hud-pill turn', text: 'Your turn' });
 const roomPill = el('div', { class: 'hud-pill room hidden', text: '' });
 const playersBar = el('div', { id: 'players-bar' });
 const menuBackBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Menu', style: 'padding:6px 12px;font-size:0.85rem' });
-hud.append(holePill, strokesPill, turnPill, roomPill, playersBar, menuBackBtn);
+hud.append(holePill, strokesPill, windPill, turnPill, roomPill, playersBar, menuBackBtn);
 
 const canvasWrap = el('div', { id: 'canvas-wrap' });
 const canvas = el('canvas', { id: 'game-canvas' });
@@ -232,6 +234,22 @@ function updateHud(): void {
   const me = localPlayer();
   const st = holeStrokes.get(localId) ?? 0;
   strokesPill.textContent = `Strokes ${st}`;
+  {
+    const w = hole.wind;
+    const str = windStrength(w);
+    if (str < 0.05) {
+      windPill.textContent = 'Wind calm';
+      windPill.title = 'No wind on this hole';
+    } else {
+      const ang = Math.atan2(w.y, w.x);
+      const deg = ((ang * 180) / Math.PI + 360) % 360;
+      const dirs = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'];
+      const arrow = dirs[Math.round(deg / 45) % 8];
+      const label = str < 0.35 ? 'light' : str < 0.7 ? 'moderate' : 'strong';
+      windPill.textContent = `Wind ${arrow} ${label}`;
+      windPill.title = `Wind ${w.x.toFixed(2)}, ${w.y.toFixed(2)} (deterministic for this hole)`;
+    }
+  }
   if (solo) {
     turnPill.textContent = phase === 'rolling' ? 'Ball rolling…' : phase === 'hole-done' ? 'Hole complete!' : 'Your turn';
   } else {
@@ -354,31 +372,58 @@ function openScorecard(final: boolean): void {
   }
   scoreBody.replaceChildren(table);
   const more = holeIndex < HOLES.length - 1;
-  nextHoleBtn.classList.toggle('hidden', !more || (!solo && !isHost));
-  nextHoleBtn.textContent = more ? 'Next Hole' : 'Finish';
-  if (!more) {
-    nextHoleBtn.classList.remove('hidden');
-    nextHoleBtn.textContent = solo || isHost ? 'Play Again' : 'Waiting for host…';
-    if (!solo && !isHost) nextHoleBtn.disabled = true;
-    else nextHoleBtn.disabled = false;
-  } else {
+  if (more) {
+    nextHoleBtn.classList.toggle('hidden', !solo && !isHost);
+    nextHoleBtn.textContent = 'Next Hole';
     nextHoleBtn.disabled = !solo && !isHost;
+    scoreMenuBtn.textContent = 'Main Menu';
+  } else {
+    // End of 9 — stop and ask for another round (don't auto-continue)
+    phase = 'round-done';
+    scoreTitle.textContent = 'Round Complete — Final Scores';
+    nextHoleBtn.classList.remove('hidden');
+    nextHoleBtn.textContent = solo || isHost ? 'Play another 9' : 'Waiting for host…';
+    nextHoleBtn.disabled = !solo && !isHost;
+    scoreMenuBtn.textContent = 'Back to menu';
   }
   scoreOverlay.classList.remove('hidden');
+}
+
+function startAnotherNine(): void {
+  // Fresh deal from the 1000-hole pool
+  const ids = dealCourse();
+  holeIndex = 0;
+  for (const p of players) {
+    p.strokes = [];
+    p.totalStrokes = 0;
+  }
+  resetHolePositions();
+  turnPlayerId = players[0]?.id ?? localId;
+  phase = 'aiming';
+  mode = 'playing';
+  scoreOverlay.classList.add('hidden');
+  layout();
+  updateHud();
+  if (!solo && isHost && net) {
+    net.broadcast({
+      type: 'start',
+      holeIndex,
+      turnPlayerId,
+      holeIds: ids,
+      courseSeed,
+    });
+  }
+  showToast(`New round! Hole 1: ${getHole(0).name}`);
 }
 
 function goNextHole(): void {
   scoreOverlay.classList.add('hidden');
   if (holeIndex >= HOLES.length - 1) {
-    // Restart course
-    holeIndex = 0;
-    for (const p of players) {
-      p.strokes = [];
-      p.totalStrokes = 0;
-    }
-  } else {
-    holeIndex++;
+    // Should use startAnotherNine instead — safety fallback
+    startAnotherNine();
+    return;
   }
+  holeIndex++;
   resetHolePositions();
   turnPlayerId = players[0]?.id ?? localId;
   phase = 'aiming';
@@ -737,9 +782,8 @@ menuBackBtn.addEventListener('click', () => {
 });
 nextHoleBtn.addEventListener('click', () => {
   if (!solo && !isHost) return;
-  if (holeIndex >= HOLES.length - 1) {
-    // play again
-    goNextHole();
+  if (holeIndex >= HOLES.length - 1 || phase === 'round-done') {
+    startAnotherNine();
     return;
   }
   goNextHole();
