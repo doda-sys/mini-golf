@@ -45,7 +45,7 @@ app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, toast);
 menuScreen.append(
   el('div', { id: 'menu-decor', text: '⛳' }),
   el('h1', { class: 'logo' }, ['Putt-Putt ', el('span', { text: 'Mini Golf' })]),
-  el('p', { class: 'tagline', text: 'Solo or multiplayer · 5 holes · drag to aim' }),
+  el('p', { class: 'tagline', text: 'Solo or multiplayer · 9 holes · drag to aim' }),
 );
 
 const menuCard = el('div', { class: 'card' });

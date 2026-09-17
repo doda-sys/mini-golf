@@ -7,7 +7,7 @@ Browser-based top-down miniature golf — solo offline play or real-time multipl
 1. **Aim:** Click/touch near your ball and **drag away** (pull-back aiming). The dashed line shows putt direction; the arc shows power.
 2. **Release** to putt. Friction slows the ball; sink it in the cup when you’re slow enough over the hole.
 3. Avoid **walls**, bounce off **pink bumpers**, slog through **sand**, slide on **ice**, and don’t splash in **water** (resets to tee).
-4. Clear all **5 holes**, check the **scorecard**, then next hole.
+4. Clear all **9 holes**, check the **scorecard**, then next hole.
 
 ### Solo
 
@@ -68,7 +68,7 @@ By default the game uses the public PeerJS broker. For heavier traffic, run your
 | Piece | Role |
 |--------|------|
 | `src/physics/world.ts` | Circle vs AABB walls, bumper bounce, friction, sand/ice/water, cup sink |
-| `src/levels/holes.ts` | 5 distinct holes |
+| `src/levels/holes.ts` | 9 distinct holes |
 | `src/game/renderer.ts` | Canvas drawing |
 | `src/game/input.ts` | Mouse + touch pull-back aim |
 | `src/net/peer.ts` | Room codes + PeerJS host/guest sync |

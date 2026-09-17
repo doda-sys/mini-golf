@@ -1,15 +1,17 @@
-import type { HoleDef, PlayerInfo, Vec2 } from '../types';
+import type { HoleDef, PlayerInfo, Vec2, Zone } from '../types';
 import { BALL_RADIUS } from '../physics/world';
 import { len } from '../physics/math';
 
 const GRASS_A = '#2d8a4e';
 const GRASS_B = '#267a44';
-const WALL = '#5c4033';
+const WALL = '#6b4a36';
+const WALL_TOP = '#8b6348';
 const WALL_EDGE = '#3d2a22';
 const SAND = '#e8d5a3';
+const SAND_DARK = '#d4bc80';
 const ICE = '#b8e0f0';
 const WATER = '#2a7aad';
-const CUP_DARK = '#111';
+const CUP_DARK = '#0a0a0a';
 const TEE = 'rgba(255,255,255,0.35)';
 
 export type AimPreview = {
@@ -71,7 +73,7 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, hole.width, hole.height);
 
-    // Grass checker
+    // Grass checker with soft vignette feel via slightly varied tiles
     const tile = 40;
     for (let y = 0; y < hole.height; y += tile) {
       for (let x = 0; x < hole.width; x += tile) {
@@ -80,37 +82,9 @@ export class Renderer {
       }
     }
 
-    // Zones
+    // Zones (hazards) — polished fills
     for (const z of hole.zones) {
-      if (z.kind === 'sand') {
-        ctx.fillStyle = SAND;
-        ctx.fillRect(z.x, z.y, z.w, z.h);
-        ctx.fillStyle = 'rgba(180,150,80,0.35)';
-        for (let i = 0; i < 12; i++) {
-          const sx = z.x + ((i * 37) % z.w);
-          const sy = z.y + ((i * 53) % z.h);
-          ctx.beginPath();
-          ctx.arc(sx, sy, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (z.kind === 'ice') {
-        ctx.fillStyle = ICE;
-        ctx.fillRect(z.x, z.y, z.w, z.h);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.strokeRect(z.x + 2, z.y + 2, z.w - 4, z.h - 4);
-      } else if (z.kind === 'water') {
-        ctx.fillStyle = WATER;
-        ctx.fillRect(z.x, z.y, z.w, z.h);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 4; i++) {
-          ctx.beginPath();
-          const yy = z.y + 10 + i * (z.h / 4);
-          ctx.moveTo(z.x + 4, yy);
-          ctx.quadraticCurveTo(z.x + z.w / 2, yy + 6, z.x + z.w - 4, yy);
-          ctx.stroke();
-        }
-      }
+      drawZone(ctx, z);
     }
 
     // Tee marker
@@ -121,53 +95,23 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(255,255,255,0.6)';
     ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '700 10px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TEE', hole.tee.x, hole.tee.y);
 
-    // Cup
-    ctx.fillStyle = CUP_DARK;
-    ctx.beginPath();
-    ctx.arc(hole.cup.x, hole.cup.y, hole.cupRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#1a1a1a';
-    ctx.beginPath();
-    ctx.arc(hole.cup.x - 2, hole.cup.y - 2, hole.cupRadius * 0.7, 0, Math.PI * 2);
-    ctx.fill();
-    // Flag
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(hole.cup.x, hole.cup.y);
-    ctx.lineTo(hole.cup.x, hole.cup.y - 36);
-    ctx.stroke();
-    ctx.fillStyle = '#e63946';
-    ctx.beginPath();
-    ctx.moveTo(hole.cup.x, hole.cup.y - 36);
-    ctx.lineTo(hole.cup.x + 18, hole.cup.y - 28);
-    ctx.lineTo(hole.cup.x, hole.cup.y - 20);
-    ctx.closePath();
-    ctx.fill();
+    // Cup + flag
+    drawCup(ctx, hole.cup.x, hole.cup.y, hole.cupRadius);
 
-    // Walls
+    // Walls — wood-like with highlight edge
     for (const w of hole.walls) {
-      ctx.fillStyle = WALL;
-      roundRect(ctx, w.x, w.y, w.w, w.h, 4);
-      ctx.fill();
-      ctx.strokeStyle = WALL_EDGE;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawWall(ctx, w.x, w.y, w.w, w.h);
     }
 
-    // Bumpers
+    // Bumpers — glossy with rim highlight
     for (const b of hole.bumpers) {
-      const g = ctx.createRadialGradient(b.x - 4, b.y - 4, 2, b.x, b.y, b.r);
-      g.addColorStop(0, '#ff8fab');
-      g.addColorStop(1, '#c9184a');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      drawBumper(ctx, b.x, b.y, b.r);
     }
 
     // Aim preview
@@ -240,6 +184,192 @@ export class Renderer {
       ctx.stroke();
     }
   }
+}
+
+function drawZone(ctx: CanvasRenderingContext2D, z: Zone): void {
+  const r = 10;
+  if (z.kind === 'sand') {
+    const g = ctx.createLinearGradient(z.x, z.y, z.x, z.y + z.h);
+    g.addColorStop(0, '#f0e0b8');
+    g.addColorStop(0.5, SAND);
+    g.addColorStop(1, SAND_DARK);
+    ctx.fillStyle = g;
+    roundRect(ctx, z.x, z.y, z.w, z.h, r);
+    ctx.fill();
+    // Soft edge ring
+    ctx.strokeStyle = 'rgba(160,130,70,0.45)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Speckle pattern (deterministic, cheap)
+    ctx.fillStyle = 'rgba(170,140,70,0.4)';
+    const n = Math.min(28, Math.floor((z.w * z.h) / 400));
+    for (let i = 0; i < n; i++) {
+      const sx = z.x + 6 + ((i * 47 + 13) % Math.max(1, z.w - 12));
+      const sy = z.y + 6 + ((i * 31 + 7) % Math.max(1, z.h - 12));
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.4 + (i % 3) * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (z.kind === 'ice') {
+    const g = ctx.createLinearGradient(z.x, z.y, z.x + z.w, z.y + z.h);
+    g.addColorStop(0, '#e8f7fc');
+    g.addColorStop(0.45, ICE);
+    g.addColorStop(1, '#9ecfe3');
+    ctx.fillStyle = g;
+    roundRect(ctx, z.x, z.y, z.w, z.h, r);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Shine streaks
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) {
+      const yy = z.y + 8 + i * ((z.h - 16) / 3);
+      ctx.beginPath();
+      ctx.moveTo(z.x + 8, yy);
+      ctx.lineTo(z.x + z.w - 8, yy + 4);
+      ctx.stroke();
+    }
+  } else if (z.kind === 'water') {
+    const g = ctx.createLinearGradient(z.x, z.y, z.x, z.y + z.h);
+    g.addColorStop(0, '#3a9ad0');
+    g.addColorStop(0.5, WATER);
+    g.addColorStop(1, '#1a5f8a');
+    ctx.fillStyle = g;
+    roundRect(ctx, z.x, z.y, z.w, z.h, r);
+    ctx.fill();
+    // Soft shore edge
+    ctx.strokeStyle = 'rgba(180,230,255,0.35)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // Wave lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 1.8;
+    const waves = Math.max(2, Math.min(5, Math.floor(z.h / 28)));
+    for (let i = 0; i < waves; i++) {
+      ctx.beginPath();
+      const yy = z.y + 10 + i * (z.h / waves);
+      ctx.moveTo(z.x + 6, yy);
+      ctx.quadraticCurveTo(z.x + z.w * 0.33, yy + 5, z.x + z.w * 0.5, yy);
+      ctx.quadraticCurveTo(z.x + z.w * 0.66, yy - 5, z.x + z.w - 6, yy);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawCup(ctx: CanvasRenderingContext2D, cx: number, cy: number, cupR: number): void {
+  // Outer grass rim (slightly raised look)
+  ctx.fillStyle = 'rgba(20,60,35,0.55)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, cupR + 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Cup rim (metal-ish ring)
+  const rim = ctx.createRadialGradient(cx - 2, cy - 2, cupR * 0.4, cx, cy, cupR + 2);
+  rim.addColorStop(0, '#2a2a2a');
+  rim.addColorStop(0.7, '#1a1a1a');
+  rim.addColorStop(0.85, '#555');
+  rim.addColorStop(1, '#333');
+  ctx.fillStyle = rim;
+  ctx.beginPath();
+  ctx.arc(cx, cy, cupR + 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Dark hole interior
+  const hole = ctx.createRadialGradient(cx, cy, 1, cx, cy, cupR);
+  hole.addColorStop(0, '#000');
+  hole.addColorStop(0.7, CUP_DARK);
+  hole.addColorStop(1, '#1a1a1a');
+  ctx.fillStyle = hole;
+  ctx.beginPath();
+  ctx.arc(cx, cy, cupR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Inner shadow ellipse for depth
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(cx + 1, cy + 2, cupR * 0.55, cupR * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Flagpole
+  ctx.strokeStyle = '#f5f5f5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx, cy - 38);
+  ctx.stroke();
+
+  // Flag
+  const flagG = ctx.createLinearGradient(cx, cy - 38, cx + 20, cy - 20);
+  flagG.addColorStop(0, '#ff6b6b');
+  flagG.addColorStop(1, '#c9184a');
+  ctx.fillStyle = flagG;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 38);
+  ctx.lineTo(cx + 20, cy - 29);
+  ctx.lineTo(cx, cy - 20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawWall(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, WALL_TOP);
+  g.addColorStop(0.35, WALL);
+  g.addColorStop(1, WALL_EDGE);
+  ctx.fillStyle = g;
+  roundRect(ctx, x, y, w, h, 5);
+  ctx.fill();
+  // Top highlight
+  ctx.strokeStyle = 'rgba(255,220,180,0.25)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Bottom edge shadow
+  ctx.strokeStyle = WALL_EDGE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const rr = Math.min(5, w / 2, h / 2);
+  ctx.moveTo(x + rr, y + h);
+  ctx.lineTo(x + w - rr, y + h);
+  ctx.stroke();
+}
+
+function drawBumper(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  // Soft shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.arc(x + 2, y + 3, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, 2, x, y, r);
+  g.addColorStop(0, '#ffb3c6');
+  g.addColorStop(0.45, '#ff4d6d');
+  g.addColorStop(1, '#a4133c');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glossy rim
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Specular highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(x - r * 0.3, y - r * 0.35, r * 0.35, r * 0.22, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Center dimple
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {

@@ -9,6 +9,9 @@ function border(w: number, h: number, t = 18): Wall[] {
   ];
 }
 
+/** Default forgiving cup radius used across the course. */
+const CUP_R = 16;
+
 export const HOLES: HoleDef[] = [
   {
     id: 1,
@@ -18,7 +21,7 @@ export const HOLES: HoleDef[] = [
     height: 720,
     tee: { x: 240, y: 620 },
     cup: { x: 240, y: 100 },
-    cupRadius: 14,
+    cupRadius: CUP_R,
     walls: [
       ...border(480, 720),
       { x: 160, y: 300, w: 160, h: 20 },
@@ -34,7 +37,7 @@ export const HOLES: HoleDef[] = [
     height: 740,
     tee: { x: 100, y: 640 },
     cup: { x: 420, y: 100 },
-    cupRadius: 14,
+    cupRadius: CUP_R,
     walls: [
       ...border(520, 740),
       { x: 200, y: 400, w: 24, h: 280 },
@@ -55,7 +58,7 @@ export const HOLES: HoleDef[] = [
     height: 760,
     tee: { x: 250, y: 680 },
     cup: { x: 250, y: 90 },
-    cupRadius: 14,
+    cupRadius: CUP_R,
     walls: [
       ...border(500, 760),
       { x: 80, y: 220, w: 140, h: 22 },
@@ -82,7 +85,7 @@ export const HOLES: HoleDef[] = [
     height: 720,
     tee: { x: 270, y: 640 },
     cup: { x: 270, y: 120 },
-    cupRadius: 13,
+    cupRadius: CUP_R,
     walls: [
       ...border(540, 720),
       { x: 120, y: 300, w: 22, h: 200 },
@@ -107,7 +110,7 @@ export const HOLES: HoleDef[] = [
     height: 780,
     tee: { x: 100, y: 700 },
     cup: { x: 460, y: 100 },
-    cupRadius: 14,
+    cupRadius: CUP_R,
     walls: [
       ...border(560, 780),
       { x: 200, y: 560, w: 24, h: 160 },
@@ -126,6 +129,127 @@ export const HOLES: HoleDef[] = [
       { x: 240, y: 420, w: 80, h: 160, frictionMul: 1, kind: 'water' },
       { x: 360, y: 220, w: 120, h: 60, frictionMul: 2.5, kind: 'sand' },
       { x: 60, y: 500, w: 120, h: 50, frictionMul: 2.3, kind: 'sand' },
+    ],
+  },
+  {
+    id: 6,
+    name: 'Ice Runway',
+    par: 3,
+    width: 500,
+    height: 740,
+    tee: { x: 250, y: 660 },
+    cup: { x: 250, y: 90 },
+    cupRadius: CUP_R,
+    walls: [
+      ...border(500, 740),
+      { x: 100, y: 280, w: 22, h: 200 },
+      { x: 378, y: 280, w: 22, h: 200 },
+      { x: 160, y: 180, w: 180, h: 20 },
+    ],
+    bumpers: [
+      { x: 160, y: 420, r: 22 },
+      { x: 340, y: 420, r: 22 },
+      { x: 250, y: 300, r: 26 },
+    ],
+    zones: [
+      { x: 140, y: 480, w: 220, h: 90, frictionMul: 0.35, kind: 'ice' },
+      { x: 170, y: 220, w: 160, h: 50, frictionMul: 0.4, kind: 'ice' },
+      { x: 80, y: 560, w: 70, h: 60, frictionMul: 2.5, kind: 'sand' },
+    ],
+  },
+  {
+    id: 7,
+    name: 'S-Curve',
+    par: 4,
+    width: 520,
+    height: 780,
+    tee: { x: 90, y: 700 },
+    cup: { x: 430, y: 90 },
+    cupRadius: CUP_R,
+    walls: [
+      ...border(520, 780),
+      { x: 180, y: 520, w: 24, h: 200 },
+      { x: 180, y: 400, w: 200, h: 24 },
+      { x: 356, y: 240, w: 24, h: 180 },
+      { x: 180, y: 240, w: 200, h: 24 },
+      { x: 80, y: 320, w: 100, h: 20 },
+    ],
+    bumpers: [
+      { x: 280, y: 560, r: 24 },
+      { x: 240, y: 340, r: 22 },
+      { x: 400, y: 200, r: 20 },
+      { x: 140, y: 180, r: 18 },
+    ],
+    zones: [
+      { x: 220, y: 440, w: 100, h: 60, frictionMul: 2.6, kind: 'sand' },
+      { x: 40, y: 480, w: 100, h: 80, frictionMul: 1, kind: 'water' },
+    ],
+  },
+  {
+    id: 8,
+    name: 'Island Green',
+    par: 4,
+    width: 540,
+    height: 760,
+    tee: { x: 270, y: 680 },
+    cup: { x: 270, y: 140 },
+    cupRadius: CUP_R,
+    walls: [
+      ...border(540, 760),
+      { x: 100, y: 360, w: 140, h: 22 },
+      { x: 300, y: 360, w: 140, h: 22 },
+      { x: 200, y: 220, w: 22, h: 100 },
+      { x: 318, y: 220, w: 22, h: 100 },
+    ],
+    bumpers: [
+      { x: 180, y: 480, r: 26 },
+      { x: 360, y: 480, r: 26 },
+      { x: 270, y: 300, r: 24 },
+      { x: 270, y: 540, r: 20 },
+    ],
+    zones: [
+      // Moat around the approach
+      { x: 60, y: 280, w: 420, h: 50, frictionMul: 1, kind: 'water' },
+      { x: 60, y: 280, w: 50, h: 160, frictionMul: 1, kind: 'water' },
+      { x: 430, y: 280, w: 50, h: 160, frictionMul: 1, kind: 'water' },
+      { x: 160, y: 580, w: 220, h: 45, frictionMul: 2.4, kind: 'sand' },
+      { x: 200, y: 160, w: 140, h: 40, frictionMul: 0.4, kind: 'ice' },
+    ],
+  },
+  {
+    id: 9,
+    name: 'Pinball Finale',
+    par: 5,
+    width: 560,
+    height: 800,
+    tee: { x: 280, y: 720 },
+    cup: { x: 280, y: 90 },
+    cupRadius: CUP_R,
+    walls: [
+      ...border(560, 800),
+      { x: 80, y: 500, w: 22, h: 180 },
+      { x: 458, y: 500, w: 22, h: 180 },
+      { x: 160, y: 380, w: 240, h: 22 },
+      { x: 100, y: 220, w: 22, h: 140 },
+      { x: 438, y: 220, w: 22, h: 140 },
+      { x: 200, y: 160, w: 160, h: 20 },
+    ],
+    bumpers: [
+      { x: 180, y: 580, r: 28 },
+      { x: 380, y: 580, r: 28 },
+      { x: 280, y: 480, r: 30 },
+      { x: 160, y: 320, r: 24 },
+      { x: 400, y: 320, r: 24 },
+      { x: 280, y: 260, r: 26 },
+      { x: 220, y: 200, r: 18 },
+      { x: 340, y: 200, r: 18 },
+    ],
+    zones: [
+      { x: 200, y: 620, w: 160, h: 50, frictionMul: 0.35, kind: 'ice' },
+      { x: 120, y: 420, w: 100, h: 55, frictionMul: 2.5, kind: 'sand' },
+      { x: 340, y: 420, w: 100, h: 55, frictionMul: 2.5, kind: 'sand' },
+      { x: 40, y: 300, w: 50, h: 120, frictionMul: 1, kind: 'water' },
+      { x: 470, y: 300, w: 50, h: 120, frictionMul: 1, kind: 'water' },
     ],
   },
 ];
