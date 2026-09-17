@@ -1,6 +1,15 @@
 /**
  * Shared all-time leaderboard via Scores (https://scores.keithcirkel.co.uk).
  * Game id is public; admin password must never ship in the client.
+ *
+ * Tie-break (client display): lower strokes win; when strokes are equal, the
+ * earlier recorded score ranks higher. The public JSON currently returns only
+ * `{ name, rank, score }` — no `at`/`ts`/`created`/`time`/`date` fields (verified
+ * Sep 2026). When a timestamp field appears we use it; otherwise we preserve the
+ * API's rank/list order as a proxy for first-recorded (Scores typically assigns
+ * ranks in submission order for equal scores). We cannot change remote tie order
+ * on submit without a server-side timestamp; encoding time into the name would be
+ * fragile within the 15-char limit.
  */
 
 export const SCORES_GAME_ID = 'VTCn8iZ31IDp';
@@ -14,6 +23,8 @@ export type LeaderboardEntry = {
   name: string;
   /** Total strokes (lower is better). */
   score: number;
+  /** Epoch ms when known (from API `at`/`ts`/`created`/…). Earlier wins ties. */
+  at?: number;
 };
 
 const TOKEN_URL = `${SCORES_BASE}/g/${SCORES_GAME_ID}/token`;
@@ -47,6 +58,74 @@ function clampScore(score: number): number {
 function secondsSinceToken(): number {
   if (!tokenRequestedAt) return 0;
   return Math.max(0, Math.floor((Date.now() - tokenRequestedAt) / 1000));
+}
+
+/** Parse optional submit time from any known Scores JSON field. */
+export function parseScoreTimestamp(raw: Record<string, unknown>): number | undefined {
+  const keys = ['at', 'ts', 'time', 'date', 'created', 'created_at', 'createdAt', 'submitted', 'submitted_at'];
+  for (const k of keys) {
+    if (!(k in raw)) continue;
+    const v = raw[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      // Heuristic: seconds vs milliseconds
+      return v < 1e12 ? Math.round(v * 1000) : Math.round(v);
+    }
+    if (typeof v === 'string' && v.trim()) {
+      const asNum = Number(v);
+      if (Number.isFinite(asNum) && asNum > 0) {
+        return asNum < 1e12 ? Math.round(asNum * 1000) : Math.round(asNum);
+      }
+      const parsed = Date.parse(v);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Sort for display: strokes ascending, then earlier timestamp ascending,
+ * then original API rank / list index (stable proxy when no timestamps).
+ * Reassigns `rank` 1..n after sorting.
+ */
+export function sortLeaderboardEntries(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  const decorated = entries.map((e, i) => ({ e, i }));
+  decorated.sort((a, b) => {
+    if (a.e.score !== b.e.score) return a.e.score - b.e.score;
+    const atA = a.e.at;
+    const atB = b.e.at;
+    if (atA != null && atB != null && atA !== atB) return atA - atB;
+    // Prefer the one that has a timestamp (earlier known) over unknown
+    if (atA != null && atB == null) return -1;
+    if (atA == null && atB != null) return 1;
+    // Fall back to API rank, then original order
+    if (a.e.rank !== b.e.rank) return a.e.rank - b.e.rank;
+    return a.i - b.i;
+  });
+  return decorated.map((d, idx) => ({
+    ...d.e,
+    rank: idx + 1,
+  }));
+}
+
+function parseScoresPayload(data: unknown): LeaderboardEntry[] {
+  if (!data || typeof data !== 'object') return [];
+  const scores = (data as { scores?: unknown }).scores;
+  if (!Array.isArray(scores)) return [];
+  const out: LeaderboardEntry[] = [];
+  for (const s of scores) {
+    if (!s || typeof s !== 'object') continue;
+    const row = s as Record<string, unknown>;
+    if (typeof row.name !== 'string' || typeof row.score !== 'number') continue;
+    const entry: LeaderboardEntry = {
+      rank: typeof row.rank === 'number' ? row.rank : out.length + 1,
+      name: row.name.slice(0, 15),
+      score: row.score,
+    };
+    const at = parseScoreTimestamp(row);
+    if (at != null) entry.at = at;
+    out.push(entry);
+  }
+  return sortLeaderboardEntries(out);
 }
 
 /** Request (or reuse) a submit token. Call when a round starts. */
@@ -136,25 +215,12 @@ export async function submitRoundScore(name: string, totalStrokes: number): Prom
   }
 }
 
-/** Fetch the shared scoreboard. Returns [] on failure. */
+/** Fetch the shared scoreboard. Returns [] on failure. Sorted client-side. */
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   try {
     const res = await fetch(LIST_URL, { cache: 'no-store' });
     if (!res.ok) return [];
-    const data = (await res.json()) as {
-      scores?: Array<{ rank?: number; name?: string; score?: number }>;
-    };
-    if (!Array.isArray(data.scores)) return [];
-    const out: LeaderboardEntry[] = [];
-    for (const s of data.scores) {
-      if (!s || typeof s.name !== 'string' || typeof s.score !== 'number') continue;
-      out.push({
-        rank: typeof s.rank === 'number' ? s.rank : out.length + 1,
-        name: s.name.slice(0, 15),
-        score: s.score,
-      });
-    }
-    return out;
+    return parseScoresPayload(await res.json());
   } catch {
     return [];
   }
@@ -303,28 +369,14 @@ export async function submitHoleScore(
   }
 }
 
-/** Fetch top scores for one hole. Returns [] on failure. */
+/** Fetch top scores for one hole. Returns [] on failure. Sorted client-side. */
 export async function fetchHoleLeaderboard(holeNumber: number): Promise<LeaderboardEntry[]> {
   const id = holeBoardId(holeNumber);
   if (!id) return [];
   try {
     const res = await fetch(`${SCORES_BASE}/g/${id}.json`, { cache: 'no-store' });
     if (!res.ok) return [];
-    const data = (await res.json()) as {
-      scores?: Array<{ rank?: number; name?: string; score?: number }>;
-    };
-    if (!Array.isArray(data.scores)) return [];
-    const out: LeaderboardEntry[] = [];
-    for (const s of data.scores) {
-      if (!s || typeof s.name !== 'string' || typeof s.score !== 'number') continue;
-      out.push({
-        rank: typeof s.rank === 'number' ? s.rank : out.length + 1,
-        name: s.name.slice(0, 15),
-        score: s.score,
-      });
-      if (out.length >= 10) break;
-    }
-    return out;
+    return parseScoresPayload(await res.json()).slice(0, 10);
   } catch {
     return [];
   }

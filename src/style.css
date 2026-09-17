@@ -511,6 +511,60 @@ label {
   z-index: 18;
 }
 
+
+/* ---- Menu live leaderboard preview ---- */
+.menu-lb-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.menu-lb-preview-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent2);
+  padding: 0 2px;
+}
+
+.menu-lb-preview-body {
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.menu-lb-preview-body .leaderboard-empty {
+  padding: 14px 10px;
+  font-size: 0.85rem;
+}
+
+.menu-lb-table {
+  font-size: 0.82rem;
+}
+
+.menu-lb-table th,
+.menu-lb-table td {
+  padding: 6px 8px;
+}
+
+.menu-lb-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.menu-lb-actions .btn {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
 /* ---- Ball color picker (start menu) ---- */
 .ball-color-row {
   display: grid;

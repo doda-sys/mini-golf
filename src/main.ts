@@ -26,6 +26,11 @@ import {
   type LeaderboardEntry,
 } from './leaderboard';
 
+const SHARE_URL = 'https://doda-sys.github.io/mini-golf/';
+const SHARE_TITLE = 'Fooze n Froops Mini Golf';
+const SHARE_TEXT = 'Play Fooze n Froops Mini Golf — solo or multiplayer mini golf in the browser!';
+const MENU_PREVIEW_TOP_N = 5;
+
 const COLORS = PLAYER_COLORS;
 
 type BallStyleId = 'white' | 'highlighter' | 'pink' | 'galactic';
@@ -138,7 +143,8 @@ for (const style of BALL_STYLES) {
 
 const soloBtn = el('button', { class: 'btn accent', type: 'button', text: 'Play Solo' });
 const createBtn = el('button', { class: 'btn', type: 'button', text: 'Create Room' });
-const leaderboardMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
+const leaderboardMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Full leaderboard' });
+const shareMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Share' });
 const joinRow = el('div', { class: 'row' });
 const joinCodeInput = el('input', {
   type: 'text',
@@ -151,6 +157,15 @@ joinCodeInput.style.textTransform = 'uppercase';
 const joinBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Join' });
 joinRow.append(joinCodeInput, joinBtn);
 const menuError = el('div', { class: 'error' });
+
+const menuLbPreview = el('div', { class: 'menu-lb-preview', id: 'menu-lb-preview' });
+const menuLbPreviewTitle = el('div', { class: 'menu-lb-preview-title', text: 'Top scores · worldwide' });
+const menuLbPreviewBody = el('div', { class: 'menu-lb-preview-body' });
+menuLbPreviewBody.append(el('p', { class: 'leaderboard-empty menu-lb-loading', text: 'Loading top scores…' }));
+const menuLbPreviewActions = el('div', { class: 'menu-lb-actions' });
+menuLbPreviewActions.append(leaderboardMenuBtn, shareMenuBtn);
+menuLbPreview.append(menuLbPreviewTitle, menuLbPreviewBody, menuLbPreviewActions);
+
 menuCard.append(
   el('label', { text: 'Player name', for: 'player-name' }),
   nameInput,
@@ -161,7 +176,7 @@ menuCard.append(
   el('label', { text: 'Join with code' }),
   joinRow,
   menuError,
-  leaderboardMenuBtn,
+  menuLbPreview,
   el('p', {
     class: 'hint',
     text: 'Multiplayer is peer-to-peer with room codes — both players must keep the tab open. Take turns on the same hole.',
@@ -212,13 +227,17 @@ const scoreBody = el('div');
 const nextHoleBtn = el('button', { class: 'btn accent', type: 'button', text: 'Next Hole' });
 const scoreMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Main Menu' });
 const scoreLeaderboardBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
-scoreCard.append(scoreTitle, scoreBody, nextHoleBtn, scoreLeaderboardBtn, scoreMenuBtn);
+const scoreShareBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Share' });
+scoreCard.append(scoreTitle, scoreBody, nextHoleBtn, scoreLeaderboardBtn, scoreShareBtn, scoreMenuBtn);
 scoreOverlay.append(scoreCard);
 
 // Leaderboard overlay
 const lbCard = el('div', { class: 'card leaderboard-card' });
 const lbTitle = el('h2', { text: 'All-time leaderboard', style: 'margin:0' });
-const lbNote = el('p', { class: 'hint lb-note', text: 'Shared worldwide · lowest strokes wins' });
+const lbNote = el('p', {
+  class: 'hint lb-note',
+  text: 'Shared worldwide · lowest strokes wins · ties: first score recorded ranks higher',
+});
 const lbBody = el('div', { class: 'leaderboard-list', id: 'leaderboard-list' });
 const lbCloseBtn = el('button', { class: 'btn accent', type: 'button', text: 'Close' });
 lbCard.append(lbTitle, lbNote, lbBody, lbCloseBtn);
@@ -283,6 +302,7 @@ function showScreen(which: 'menu' | 'lobby' | 'game'): void {
   menuScreen.classList.toggle('hidden', which !== 'menu');
   lobbyScreen.classList.toggle('hidden', which !== 'lobby');
   gameScreen.classList.toggle('hidden', which !== 'game');
+  if (which === 'menu') void refreshMenuLeaderboardPreview();
 }
 
 function localPlayer(): PlayerInfo | undefined {
@@ -537,21 +557,68 @@ function recordRoundOnLeaderboard(): void {
   })();
 }
 
-async function renderLeaderboardList(): Promise<void> {
-  lbBody.replaceChildren(
-    el('p', { class: 'leaderboard-empty', text: 'Loading leaderboard…' }),
-  );
-  const entries = await fetchLeaderboard();
-  if (entries.length === 0) {
-    lbBody.replaceChildren(
-      el('p', {
-        class: 'leaderboard-empty',
-        text: 'No scores yet — or the board is unreachable. Finish a 9-hole round to post yours!',
-      }),
-    );
+async function copyShareLink(): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(SHARE_URL);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = SHARE_URL;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function shareGame(): Promise<void> {
+  const payload: ShareData = {
+    title: SHARE_TITLE,
+    text: SHARE_TEXT,
+    url: SHARE_URL,
+  };
+  try {
+    if (typeof navigator.share === 'function') {
+      // Some browsers require canShare; treat failure as cancel / fallback.
+      if (!navigator.canShare || navigator.canShare(payload)) {
+        await navigator.share(payload);
+        return;
+      }
+    }
+  } catch (err) {
+    // User cancel — don't toast an error
+    if (err instanceof DOMException && err.name === 'AbortError') return;
+  }
+
+  const copied = await copyShareLink();
+  if (copied) {
+    showToast('Link copied — paste into Texts or Messages!');
     return;
   }
-  const table = el('table', { class: 'leaderboard-table' });
+
+  // Last resort: open SMS / mailto with the link
+  const smsBody = encodeURIComponent(`${SHARE_TEXT} ${SHARE_URL}`);
+  const smsUrl = `sms:?&body=${smsBody}`;
+  const mailUrl = `mailto:?subject=${encodeURIComponent(SHARE_TITLE)}&body=${smsBody}`;
+  const choice = window.confirm('Open Messages to text the game link?\\n\\nCancel opens email instead.');
+  window.location.href = choice ? smsUrl : mailUrl;
+}
+
+function buildLeaderboardTable(entries: LeaderboardEntry[], opts?: { compact?: boolean }): HTMLTableElement {
+  const table = el('table', {
+    class: opts?.compact ? 'leaderboard-table menu-lb-table' : 'leaderboard-table',
+  });
   const head = el('tr');
   head.append(
     el('th', { text: '#' }),
@@ -571,7 +638,42 @@ async function renderLeaderboardList(): Promise<void> {
     );
     table.append(tr);
   }
-  lbBody.replaceChildren(table);
+  return table;
+}
+
+async function refreshMenuLeaderboardPreview(): Promise<void> {
+  menuLbPreviewBody.replaceChildren(
+    el('p', { class: 'leaderboard-empty menu-lb-loading', text: 'Loading top scores…' }),
+  );
+  const entries = await fetchLeaderboard();
+  if (entries.length === 0) {
+    menuLbPreviewBody.replaceChildren(
+      el('p', {
+        class: 'leaderboard-empty',
+        text: 'No scores yet — finish a 9 to post yours!',
+      }),
+    );
+    return;
+  }
+  const top = entries.slice(0, MENU_PREVIEW_TOP_N);
+  menuLbPreviewBody.replaceChildren(buildLeaderboardTable(top, { compact: true }));
+}
+
+async function renderLeaderboardList(): Promise<void> {
+  lbBody.replaceChildren(
+    el('p', { class: 'leaderboard-empty', text: 'Loading leaderboard…' }),
+  );
+  const entries = await fetchLeaderboard();
+  if (entries.length === 0) {
+    lbBody.replaceChildren(
+      el('p', {
+        class: 'leaderboard-empty',
+        text: 'No scores yet — or the board is unreachable. Finish a 9-hole round to post yours!',
+      }),
+    );
+    return;
+  }
+  lbBody.replaceChildren(buildLeaderboardTable(entries));
 }
 
 function openLeaderboard(): void {
@@ -1102,6 +1204,8 @@ function startMultiplayerRound(): void {
 soloBtn.addEventListener('click', startSolo);
 leaderboardMenuBtn.addEventListener('click', openLeaderboard);
 scoreLeaderboardBtn.addEventListener('click', openLeaderboard);
+shareMenuBtn.addEventListener('click', () => void shareGame());
+scoreShareBtn.addEventListener('click', () => void shareGame());
 lbCloseBtn.addEventListener('click', closeLeaderboard);
 leaderboardOverlay.addEventListener('click', (e) => {
   if (e.target === leaderboardOverlay) closeLeaderboard();
@@ -1144,6 +1248,9 @@ scoreMenuBtn.addEventListener('click', () => {
 window.addEventListener('resize', () => {
   if (mode === 'playing') layout();
 });
+
+// Initial menu leaderboard preview
+void refreshMenuLeaderboardPreview();
 
 // Game loop
 function tick(ts: number): void {

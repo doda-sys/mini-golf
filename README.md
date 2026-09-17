@@ -31,6 +31,8 @@ Water on **2/9** (~20%). Shortcuts on **3/9** (~30%). Every green has a coherent
 7. Read the large **hole plaque** (outside the green): number, name, par, length, plus a **worldwide per-hole leaderboard** (best strokes on that hole).
 8. Pick your **ball color** on the start menu (White / Highlighter yellow / Pink / Galactic) — saved for next time.
 9. Clear all **9 holes**, check the **scorecard**, then play another 9 (same course order).
+10. The **start menu** shows a live **top-scores preview** from the worldwide board; open **Full leaderboard** for everyone. Ties: first recorded score at that stroke total ranks higher (client sorts by strokes, then timestamp when the Scores API provides one).
+11. Tap **Share** to send the game link (Web Share on phones, or copy/SMS/email fallback).
 
 ### Solo
 
