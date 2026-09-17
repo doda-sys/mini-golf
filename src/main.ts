@@ -1,4 +1,5 @@
 import './style.css';
+import './plaques.css';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, ROUND_HOLES } from './levels/holes';
 import { Renderer } from './game/renderer';
 import { THEMES } from './levels/themes';
@@ -30,6 +31,41 @@ const SHARE_URL = 'https://doda-sys.github.io/mini-golf/';
 const SHARE_TITLE = 'Fooze n Froops Mini Golf';
 const SHARE_TEXT = 'Play Fooze n Froops Mini Golf — solo or multiplayer mini golf in the browser!';
 const MENU_PREVIEW_TOP_N = 5;
+
+
+/** Designer plaque material keys (data-theme) mapped from course themes / hole order. */
+const PLAQUE_THEME_BY_HOLE_THEME: Record<string, string> = {
+  tropical: 'palm-wood',
+  autumn: 'autumn-wood',
+  castle: 'windmill-enamel',
+  neon: 'neon-acrylic',
+  pirate: 'pirate-brass',
+  desert: 'desert-stone',
+  space: 'sci-fi-panel',
+  volcano: 'lava-rock',
+  candy: 'candy-sign',
+  arctic: 'palm-wood',
+};
+
+const PLAQUE_THEME_BY_HOLE: string[] = [
+  'palm-wood',
+  'autumn-wood',
+  'windmill-enamel',
+  'neon-acrylic',
+  'pirate-brass',
+  'desert-stone',
+  'sci-fi-panel',
+  'lava-rock',
+  'candy-sign',
+];
+
+function plaqueThemeForHole(holeIndex: number, themeId?: string): string {
+  return (
+    PLAQUE_THEME_BY_HOLE[holeIndex] ??
+    PLAQUE_THEME_BY_HOLE_THEME[themeId ?? ''] ??
+    'palm-wood'
+  );
+}
 
 const COLORS = PLAYER_COLORS;
 
@@ -214,36 +250,87 @@ const playersBar = el('div', { id: 'players-bar' });
 const menuBackBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Menu', style: 'padding:5px 10px;font-size:0.8rem' });
 hud.append(holePill, strokesPill, topoBtn, turnPill, roomPill, playersBar, menuBackBtn);
 
+const playWrap = el('div', { id: 'play-wrap' });
 const canvasWrap = el('div', { id: 'canvas-wrap' });
 const canvas = el('canvas', { id: 'game-canvas' });
+const plaqueDock = el('div', { id: 'plaque-dock', 'aria-live': 'polite' });
 
-// Themed HTML plaque — outside the green projection; tap to expand/collapse on small screens.
-const holePlaque = el('aside', { id: 'hole-plaque', class: 'hole-plaque collapsed', role: 'complementary', 'aria-label': 'Hole info' });
-const plaqueToggle = el('button', { class: 'plaque-toggle', type: 'button', title: 'Hole info', text: '⛳' });
-const plaqueBody = el('div', { class: 'plaque-body' });
-const plaqueOrnament = el('div', { class: 'plaque-ornament', 'aria-hidden': 'true' });
-const plaqueHoleNum = el('div', { class: 'plaque-hole-num', text: 'HOLE 1' });
-const plaqueTitle = el('div', { class: 'plaque-title', text: '' });
-const plaqueMeta = el('div', { class: 'plaque-meta', text: '' });
-const plaqueLbLabel = el('div', { class: 'plaque-lb-label', text: 'WORLD BEST' });
-const plaqueLb = el('ol', { class: 'plaque-lb' });
-plaqueBody.append(plaqueOrnament, plaqueHoleNum, plaqueTitle, plaqueMeta, plaqueLbLabel, plaqueLb);
-holePlaque.append(plaqueToggle, plaqueBody);
-plaqueToggle.addEventListener('click', (e) => {
-  e.stopPropagation();
-  holePlaque.classList.toggle('collapsed');
-  holePlaque.classList.toggle('expanded');
+// Designer HTML plaque — under the green in #plaque-dock (never overlays fairway).
+// Default compact strip; tap toggles expanded bottom-sheet (grows dock upward).
+const holePlaque = el('aside', {
+  id: 'hole-plaque',
+  class: 'plaque plaque--compact',
+  role: 'button',
+  tabindex: '0',
+  'aria-expanded': 'false',
+  'aria-label': 'Hole info',
+  'data-hole': '1',
+  'data-theme': 'palm-wood',
 });
-plaqueBody.addEventListener('click', () => {
-  // Tap compact plaque body to expand on mobile
-  if (holePlaque.classList.contains('collapsed')) {
-    holePlaque.classList.remove('collapsed');
-    holePlaque.classList.add('expanded');
+
+const plaqueStrip = el('div', { class: 'plaque__strip' });
+const plaqueStripEyebrow = el('span', { class: 'plaque__eyebrow', text: 'Hole 01' });
+const plaqueStripTitle = el('span', { class: 'plaque__title plaque__title--short', text: '' });
+const plaqueStripMeta = el('span', { class: 'plaque__meta' });
+const plaqueStripPar = el('span', { class: 'plaque__par', text: 'Par 3' });
+const plaqueStripDot = el('span', { class: 'plaque__meta-dot', 'aria-hidden': 'true' });
+const plaqueStripLength = el('span', { class: 'plaque__length', text: '132 ft' });
+plaqueStripMeta.append(plaqueStripPar, plaqueStripDot, plaqueStripLength);
+plaqueStrip.append(plaqueStripEyebrow, plaqueStripTitle, plaqueStripMeta);
+
+const plaqueBody = el('div', { class: 'plaque__body' });
+const plaqueEyebrow = el('div', { class: 'plaque__eyebrow', text: 'Hole 01' });
+const plaqueTitle = el('h2', { class: 'plaque__title', text: '' });
+const plaqueMeta = el('div', { class: 'plaque__meta' });
+const plaquePar = el('span', { class: 'plaque__par', text: 'Par 3' });
+const plaqueDot = el('span', { class: 'plaque__meta-dot', 'aria-hidden': 'true' });
+const plaqueLength = el('span', { class: 'plaque__length', text: '132 ft' });
+plaqueMeta.append(plaquePar, plaqueDot, plaqueLength);
+const plaqueDivider = el('div', { class: 'plaque__divider', role: 'presentation' });
+const plaqueBest = el('div', { class: 'plaque__best' });
+const plaqueBestLabel = el('div', { class: 'plaque__best-label', text: 'WORLD BEST' });
+const plaqueBestList = el('ol', { class: 'plaque__best-list' });
+const plaqueBestEmpty = el('p', { class: 'plaque__best-empty', text: 'Be the first' });
+plaqueBest.append(plaqueBestLabel, plaqueBestList, plaqueBestEmpty);
+plaqueBody.append(plaqueEyebrow, plaqueTitle, plaqueMeta, plaqueDivider, plaqueBest);
+
+holePlaque.append(plaqueStrip, plaqueBody);
+
+function setPlaqueExpanded(expanded: boolean): void {
+  holePlaque.classList.toggle('plaque--compact', !expanded);
+  holePlaque.classList.toggle('plaque--expanded', expanded);
+  holePlaque.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  plaqueDock.classList.toggle('plaque-open', expanded);
+  // Refit fairway after dock height changes so the plaque never covers green.
+  requestAnimationFrame(() => {
+    if (mode === 'playing') layout();
+  });
+}
+
+function togglePlaque(): void {
+  setPlaqueExpanded(holePlaque.getAttribute('aria-expanded') !== 'true');
+}
+
+holePlaque.addEventListener('click', (e) => {
+  e.stopPropagation();
+  togglePlaque();
+});
+holePlaque.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    togglePlaque();
+  } else if (e.key === 'Escape') {
+    setPlaqueExpanded(false);
   }
 });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') setPlaqueExpanded(false);
+});
 
-canvasWrap.append(canvas, holePlaque);
-gameScreen.append(hud, canvasWrap);
+canvasWrap.append(canvas);
+plaqueDock.append(holePlaque);
+playWrap.append(canvasWrap, plaqueDock);
+gameScreen.append(hud, playWrap);
 
 // Score overlay content
 const scoreCard = el('div', { class: 'card' });
@@ -398,103 +485,64 @@ let plaqueContentKey = '';
 function updateHolePlaque(force = false): void {
   const hole = getHole(holeIndex);
   const themeId = hole.theme ?? 'tropical';
-  const top = holePlaqueScores.slice(0, 5);
-  const contentKey = `${holeIndex}|${themeId}|${hole.name}|${hole.par}|${hole.lengthFeet}|${top.map((e) => `${e.rank}:${e.name}:${e.score}`).join(';')}`;
+  const plaqueTheme = plaqueThemeForHole(holeIndex, themeId);
+  const top = holePlaqueScores.slice(0, 3);
+  const contentKey = `${holeIndex}|${plaqueTheme}|${hole.name}|${hole.par}|${hole.lengthFeet}|${top.map((e) => `${e.rank}:${e.name}:${e.score}`).join(';')}`;
   if (force || contentKey !== plaqueContentKey) {
     plaqueContentKey = contentKey;
-    holePlaque.classList.remove(
-      'plaque-tropical', 'plaque-autumn', 'plaque-castle', 'plaque-neon', 'plaque-pirate',
-      'plaque-desert', 'plaque-space', 'plaque-volcano', 'plaque-candy', 'plaque-arctic',
-    );
-    holePlaque.classList.add(`plaque-${themeId}`);
-    if (!holePlaque.classList.contains('expanded') && !holePlaque.classList.contains('collapsed')) {
-      holePlaque.classList.add('collapsed');
-    }
-    plaqueHoleNum.textContent = `HOLE ${holeIndex + 1}`;
-    plaqueTitle.textContent = hole.name;
-    plaqueMeta.textContent = `Par ${hole.par}  ·  ${hole.lengthFeet} ft`;
-    plaqueToggle.title = `${hole.name} · Par ${hole.par}`;
-    plaqueToggle.setAttribute('aria-label', `Hole info: ${hole.name}`);
-    plaqueOrnament.dataset.theme = themeId;
-    plaqueOrnament.textContent = plaqueGlyph(themeId);
+    const n = holeIndex + 1;
+    const holeLabel = `Hole ${String(n).padStart(2, '0')}`;
+    const lengthText = `${hole.lengthFeet} ft`;
+    const parText = `Par ${hole.par}`;
 
-    plaqueLb.replaceChildren();
+    holePlaque.dataset.hole = String(n);
+    holePlaque.dataset.theme = plaqueTheme;
+    holePlaque.setAttribute('aria-label', `Hole ${n}: ${hole.name}`);
+
+    // Keep compact default when switching holes unless already expanded.
+    if (!holePlaque.classList.contains('plaque--expanded') && !holePlaque.classList.contains('plaque--compact')) {
+      holePlaque.classList.add('plaque--compact');
+    }
+
+    plaqueStripEyebrow.textContent = holeLabel;
+    plaqueStripTitle.textContent = hole.name;
+    plaqueStripPar.textContent = parText;
+    plaqueStripLength.textContent = lengthText;
+
+    plaqueEyebrow.textContent = holeLabel;
+    plaqueTitle.textContent = hole.name;
+    plaquePar.textContent = parText;
+    plaqueLength.textContent = lengthText;
+
+    plaqueBestList.replaceChildren();
     if (top.length === 0) {
-      plaqueLb.append(el('li', { class: 'plaque-lb-empty', text: 'No scores yet — sink it!' }));
+      plaqueBestEmpty.hidden = false;
+      plaqueBestList.hidden = true;
     } else {
+      plaqueBestEmpty.hidden = true;
+      plaqueBestList.hidden = false;
       for (const e of top) {
         const li = document.createElement('li');
         const nm = e.name.length > 12 ? e.name.slice(0, 11) + '…' : e.name;
-        li.innerHTML = `<span class="rk">${e.rank}</span><span class="nm"></span><span class="sc">${e.score}</span>`;
-        li.querySelector('.nm')!.textContent = nm;
-        if (e.rank === 1) li.classList.add('best');
-        plaqueLb.append(li);
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'name';
+        nameSpan.textContent = `${e.rank}. ${nm}`;
+        const strokesSpan = document.createElement('span');
+        strokesSpan.className = 'strokes';
+        strokesSpan.textContent = String(e.score);
+        li.append(nameSpan, strokesSpan);
+        plaqueBestList.append(li);
       }
     }
   }
   positionHolePlaque();
 }
 
-function plaqueGlyph(themeId: string): string {
-  switch (themeId) {
-    case 'tropical': return '🌴';
-    case 'autumn': return '🍁';
-    case 'castle': return '🏰';
-    case 'neon': return '◈';
-    case 'pirate': return '☠';
-    case 'desert': return '🌵';
-    case 'space': return '✦';
-    case 'volcano': return '🌋';
-    case 'candy': return '🍬';
-    case 'arctic': return '❄';
-    default: return '⛳';
-  }
-}
-
 function positionHolePlaque(): void {
-  // Prefer a pocket outside the green AABB; fall back to a corner overlay on the rim.
-  const hole = getHole(holeIndex);
-  const g = renderer.greenScreenRect(hole);
-  const wrap = canvasWrap.getBoundingClientRect();
-  const pw = holePlaque.offsetWidth || 160;
-  const ph = holePlaque.offsetHeight || 120;
-  const margin = 8;
-  const leftPocket = g.minX;
-  const rightPocket = wrap.width - g.maxX;
-  const bottomPocket = wrap.height - g.maxY;
-  const topPocket = g.minY;
-
-  let left = margin;
-  let top = margin;
-  let place = 'tl';
-
-  if (leftPocket >= pw + margin * 2) {
-    left = Math.max(margin, (leftPocket - pw) / 2);
-    top = Math.min(Math.max(margin, g.minY), Math.max(margin, wrap.height - ph - margin));
-    place = 'left';
-  } else if (rightPocket >= pw + margin * 2) {
-    left = wrap.width - rightPocket / 2 - pw / 2;
-    left = Math.min(left, wrap.width - pw - margin);
-    top = Math.min(Math.max(margin, g.minY), Math.max(margin, wrap.height - ph - margin));
-    place = 'right';
-  } else if (bottomPocket >= ph + margin * 2) {
-    left = Math.max(margin, Math.min((wrap.width - pw) / 2, wrap.width - pw - margin));
-    top = g.maxY + Math.max(margin, (bottomPocket - ph) / 2);
-    place = 'bottom';
-  } else if (topPocket >= ph + margin * 2) {
-    left = Math.max(margin, Math.min((wrap.width - pw) / 2, wrap.width - pw - margin));
-    top = Math.max(margin, (topPocket - ph) / 2);
-    place = 'top';
-  } else {
-    // Thin corner pocket — keep off the green center; sit on theme rim.
-    left = margin;
-    top = Math.max(margin, wrap.height - ph - margin);
-    place = 'corner';
-  }
-
-  holePlaque.style.left = `${Math.round(left)}px`;
-  holePlaque.style.top = `${Math.round(top)}px`;
-  holePlaque.dataset.place = place;
+  // Plaque lives in #plaque-dock under the canvas — clear any legacy overlay coords.
+  holePlaque.style.left = '';
+  holePlaque.style.top = '';
+  holePlaque.dataset.place = 'dock';
 }
 
 function updateHud(): void {
@@ -941,6 +989,7 @@ function goNextHole(): void {
     return;
   }
   holeIndex++;
+  setPlaqueExpanded(false);
   resetHolePositions();
   turnPlayerId = players[0]?.id ?? localId;
   phase = 'aiming';

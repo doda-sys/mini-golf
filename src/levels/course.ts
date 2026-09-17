@@ -208,6 +208,19 @@ function zChannel(
   ];
 }
 
+/** Locked display lengths (ft) for holes 1–9 — graphic pack contract. */
+const LOCKED_LENGTH_FT: Record<number, number> = {
+  1: 132,
+  2: 221,
+  3: 151,
+  4: 117,
+  5: 158,
+  6: 318,
+  7: 156,
+  8: 150,
+  9: 260,
+};
+
 function finish(partial: {
   id: number;
   name: string;
@@ -232,7 +245,9 @@ function finish(partial: {
 }): HoleDef {
   const t = partial.topo;
   const w = wind(partial.windDeg, partial.windMph);
-  const lengthFeet = feetFromPath(partial.tee, partial.pathVia ?? [], partial.cup);
+  const lengthFeet =
+    LOCKED_LENGTH_FT[partial.id] ??
+    feetFromPath(partial.tee, partial.pathVia ?? [], partial.cup);
   return {
     id: partial.id,
     name: partial.name,

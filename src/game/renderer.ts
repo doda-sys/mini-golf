@@ -19,7 +19,7 @@ const CUP_DARK = '#0a0a0a';
 
 /**
  * Tiny world-space rim around the green AABB so curb/theme trim stays visible.
- * Camera fits the green tightly — plaque is an HTML overlay, not canvas chrome.
+ * Camera fits the green tightly — plaque is HTML under the canvas (plaque dock).
  */
 export const THEME_PAD = 24;
 
@@ -85,16 +85,21 @@ export class Renderer {
     const greenW = Math.max(48, gb.maxX - gb.minX);
     const greenH = Math.max(48, gb.maxY - gb.minY);
 
-    // Fit the green AABB itself to the viewport (tiny CSS inset only). Theme rim may
-    // sit partially off-screen — fairway dominates; plaque is HTML outside the green.
-    const inset = 4;
-    const playW = Math.max(64, maxW - inset * 2);
-    const playH = Math.max(64, maxH - inset * 2);
+    // Fit the green AABB to the canvas stage. Extra bottom inset gives breathing room
+    // above the plaque dock so the fairway isn't flush with the stage bottom.
+    // Plaque lives in HTML under the canvas — never overlaid on the green.
+    const insetX = 4;
+    const insetTop = 4;
+    const insetBottom = 18;
+    const playW = Math.max(64, maxW - insetX * 2);
+    const playH = Math.max(64, maxH - insetTop - insetBottom);
     const fit = Math.min(playW / greenW, playH / greenH);
     const worldViewW = greenW * fit;
     const worldViewH = greenH * fit;
     const ox = (maxW - worldViewW) / 2;
-    const oy = (maxH - worldViewH) / 2;
+    // Bias leftover vertical slack toward the top so bottom breathing room stays.
+    const freeY = maxH - worldViewH;
+    const oy = Math.min(freeY - insetBottom, Math.max(insetTop, freeY * 0.35));
 
     this.scale = fit;
     // Camera origin = green top-left (no world rim reserved in the fit).
