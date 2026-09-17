@@ -1,5 +1,11 @@
 import './style.css';
 import './plaques.css';
+import {
+  considerTipsAfterRoundComplete,
+  createTipPanel,
+  hideTipPanel,
+  resetTipRoundGate,
+} from './tips';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, ROUND_HOLES } from './levels/holes';
 import { Renderer } from './game/renderer';
 import { THEMES } from './levels/themes';
@@ -340,7 +346,8 @@ const nextHoleBtn = el('button', { class: 'btn accent', type: 'button', text: 'N
 const scoreMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Main Menu' });
 const scoreLeaderboardBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
 const scoreShareBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Share' });
-scoreCard.append(scoreTitle, scoreBody, nextHoleBtn, scoreLeaderboardBtn, scoreShareBtn, scoreMenuBtn);
+const tipPanel = createTipPanel();
+scoreCard.append(scoreTitle, scoreBody, tipPanel, nextHoleBtn, scoreLeaderboardBtn, scoreShareBtn, scoreMenuBtn);
 scoreOverlay.append(scoreCard);
 
 // Leaderboard overlay
@@ -452,6 +459,8 @@ function resetHolePositions(): void {
 
 function startSolo(): void {
   destroyNet();
+  hideTipPanel();
+  resetTipRoundGate();
   solo = true;
   isHost = true;
   localId = 'local';
@@ -934,6 +943,7 @@ function openScorecard(final: boolean): void {
   scoreBody.replaceChildren(table, parNote);
   const more = holeIndex < HOLES.length - 1;
   if (more) {
+    hideTipPanel();
     nextHoleBtn.classList.toggle('hidden', !solo && !isHost);
     nextHoleBtn.textContent = 'Next Hole';
     nextHoleBtn.disabled = !solo && !isHost;
@@ -947,12 +957,18 @@ function openScorecard(final: boolean): void {
     nextHoleBtn.disabled = !solo && !isHost;
     scoreMenuBtn.textContent = 'Back to menu';
     recordRoundOnLeaderboard();
+    // Soft tip: local player's completed-9 stats only (solo / host / guest)
+    const me = localPlayer();
+    const localTotal = me?.totalStrokes ?? 0;
+    considerTipsAfterRoundComplete(localTotal);
   }
   scoreOverlay.classList.remove('hidden');
 }
 
 function startAnotherNine(): void {
   // Replay the same curated championship 9
+  hideTipPanel();
+  resetTipRoundGate();
   const ids = dealCourse();
   holeIndex = 0;
   leaderboardSavedThisRound = false;
@@ -982,6 +998,7 @@ function startAnotherNine(): void {
 }
 
 function goNextHole(): void {
+  hideTipPanel();
   scoreOverlay.classList.add('hidden');
   if (holeIndex >= HOLES.length - 1) {
     // Should use startAnotherNine instead — safety fallback
@@ -1183,6 +1200,8 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
     }
     case 'start': {
       if (msg.holeIds?.length) loadCourse(msg.holeIds, msg.courseSeed);
+      hideTipPanel();
+      resetTipRoundGate();
       holeIndex = msg.holeIndex;
       turnPlayerId = msg.turnPlayerId;
       leaderboardSavedThisRound = false;
@@ -1323,6 +1342,8 @@ async function joinRoom(): Promise<void> {
 
 function startMultiplayerRound(): void {
   if (!isHost) return;
+  hideTipPanel();
+  resetTipRoundGate();
   const ids = dealCourse();
   holeIndex = 0;
   leaderboardSavedThisRound = false;
@@ -1367,6 +1388,8 @@ leaveLobbyBtn.addEventListener('click', () => {
   mode = 'menu';
 });
 menuBackBtn.addEventListener('click', () => {
+  hideTipPanel();
+  resetTipRoundGate();
   destroyNet();
   scoreOverlay.classList.add('hidden');
   closeLeaderboard();
@@ -1383,6 +1406,8 @@ nextHoleBtn.addEventListener('click', () => {
   goNextHole();
 });
 scoreMenuBtn.addEventListener('click', () => {
+  hideTipPanel();
+  resetTipRoundGate();
   destroyNet();
   scoreOverlay.classList.add('hidden');
   closeLeaderboard();

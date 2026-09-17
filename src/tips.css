@@ -1,0 +1,83 @@
+.tip-panel {
+  margin-top: 4px;
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(138, 201, 38, 0.28);
+  background: linear-gradient(
+    160deg,
+    rgba(27, 122, 85, 0.35),
+    rgba(8, 40, 30, 0.55)
+  );
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tip-panel.hidden {
+  display: none;
+}
+
+.tip-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #e8f0ff;
+}
+
+.tip-body {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted, #a8c5b8);
+  white-space: pre-line;
+}
+
+.tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tip-btn {
+  flex: 1 1 calc(50% - 8px);
+  min-width: 0;
+  padding: 12px 10px;
+  font-size: 0.95rem;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+a.tip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+a.tip-btn.accent {
+  color: #0b2e1f;
+}
+
+a.tip-btn.secondary {
+  color: var(--text, #e8f0ff);
+}
+
+.tip-later {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+@media (min-width: 420px) {
+  .tip-btn {
+    flex: 1 1 calc(25% - 8px);
+  }
+}
+
+@media (max-width: 380px) {
+  .tip-btn {
+    flex: 1 1 100%;
+  }
+}
