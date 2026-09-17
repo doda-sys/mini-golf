@@ -44,6 +44,23 @@ export type GrassPattern =
   | { kind: 'noise'; scale: number; a: string; b: string; c: string }
   | { kind: 'rings'; spacing: number; a: string; b: string };
 
+/** Gaussian bump in normalized green AABB coords (see levels/topo.ts). */
+export type TopoBump = {
+  x: number;
+  y: number;
+  amp: number;
+  rx: number;
+  ry: number;
+};
+
+/** Coherent height field — drives green-map overlay AND physics break. */
+export type GreenTopo = {
+  bumps: TopoBump[];
+  tiltX: number;
+  tiltY: number;
+  strength: number;
+};
+
 export type HoleDef = {
   id: number;
   name: string;
@@ -64,15 +81,21 @@ export type HoleDef = {
   /** Grass fill style (deterministic from hole id). */
   grass: GrassPattern;
   /**
-   * Per-hole wind vector (direction + strength ~0–1.2). Physics applies a
-   * speed-scaled lateral/crosswind drift while the ball is moving.
-   * Deterministic from hole id so multiplayer stays in sync without net messages.
+   * Unit wind direction (blowing toward). Calm holes still set a direction
+   * with windMph === 0 so the compass can show 0 mph.
+   * Deterministic from hole id for multiplayer sync.
    */
   wind: Vec2;
+  /** Wind speed in mph, inclusive 0–25. */
+  windMph: number;
   /**
-   * Optional green break / slope: downhill direction with magnitude ~0–1.1.
-   * Constant gravity-like acceleration while on the green. Flat holes use {0,0}.
-   * Deterministic from hole id (separate seed) for multiplayer sync.
+   * Height field for green break. Visual topo map and physics use the same field.
+   * Deterministic from hole id.
+   */
+  topo: GreenTopo;
+  /**
+   * @deprecated Prefer topo — kept as average downhill for HUD hints.
+   * Constant gravity-like vector derived from topo tilt.
    */
   slope: Vec2;
 };

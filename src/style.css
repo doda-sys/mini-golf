@@ -382,3 +382,22 @@ label {
     padding: 12px 14px;
   }
 }
+
+.topo-toggle.active {
+  background: rgba(255, 200, 80, 0.28);
+  border-color: rgba(255, 210, 100, 0.7);
+  color: #ffe9a8;
+}
+
+.score-table .par-row td {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.score-table .score-eagle { color: #7cf0c2; font-weight: 800; }
+.score-table .score-birdie { color: #8ac926; font-weight: 800; }
+.score-table .score-par { color: #e8f0ff; }
+.score-table .score-bogey { color: #ffb703; font-weight: 700; }
+.score-table .score-double { color: #ff6b6b; font-weight: 700; }

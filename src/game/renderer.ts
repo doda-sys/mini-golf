@@ -2,6 +2,13 @@ import type { GrassPattern, HoleDef, PlayerInfo, Vec2, Zone } from '../types';
 import { BALL_RADIUS } from '../physics/world';
 import { len } from '../physics/math';
 import { THEMES, type HoleTheme } from '../levels/themes';
+import { WIND_MAX_MPH } from '../levels/generate';
+import {
+  polyBounds as topoBounds,
+  sampleHeight,
+  sampleDownhill,
+  sampleSteepness,
+} from '../levels/topo';
 
 const SAND = '#e8d5a3';
 const SAND_DARK = '#d4bc80';
@@ -77,6 +84,7 @@ export class Renderer {
     localId: string,
     aim: AimPreview,
     highlightId: string | null,
+    showGreenMap = false,
   ): void {
     const ctx = this.ctx;
     const theme = THEMES[hole.theme] ?? THEMES.tropical;
@@ -93,7 +101,12 @@ export class Renderer {
     pathPoly(ctx, green);
     ctx.clip();
     drawGrass(ctx, hole, green);
-    drawSlopeCues(ctx, hole, green);
+    if (showGreenMap && hole.topo) {
+      drawGreenMapOverlay(ctx, hole, green);
+    } else {
+      // Subtle always-on break cues (much quieter than full topo book)
+      drawSlopeCues(ctx, hole, green, true);
+    }
     // Soft inner shadow along green
     ctx.strokeStyle = 'rgba(0,0,0,0.22)';
     ctx.lineWidth = 8;
@@ -104,8 +117,8 @@ export class Renderer {
     // Green curb / bevel rim
     drawGreenRim(ctx, green, theme);
 
-    // Subtle wind compass on/near the green when windy
-    drawWindIndicator(ctx, hole, green);
+    // Large wind key outside the putting green (always, including 0 mph)
+    drawWindKey(ctx, hole, green, pad);
 
     // Zones (hazards) — clipped to green visually via draw order
     ctx.save();
@@ -376,8 +389,13 @@ function pointInPolyLocal(px: number, py: number, poly: Vec2[]): boolean {
   return inside;
 }
 
-/** Contour lines, downhill chevrons, and tint so break is readable before putting. */
-function drawSlopeCues(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
+/** Subtle break cues when Green Map is off (topo still affects physics). */
+function drawSlopeCues(
+  ctx: CanvasRenderingContext2D,
+  hole: HoleDef,
+  green: Vec2[],
+  subtle = false,
+): void {
   const s = hole.slope;
   if (!s || (s.x === 0 && s.y === 0)) return;
   const mag = Math.hypot(s.x, s.y);
@@ -386,76 +404,161 @@ function drawSlopeCues(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2
   const { minX, minY, maxX, maxY, cx, cy } = polyBounds(green);
   const dx = s.x / mag;
   const dy = s.y / mag;
-  // Contour direction (perpendicular to downhill)
   const px = -dy;
   const py = dx;
   const span = Math.hypot(maxX - minX, maxY - minY) + 40;
   const strength = Math.min(1, mag / 1.1);
+  const alphaMul = subtle ? 0.35 : 1;
 
-  // Gradient tint: lighter uphill, darker downhill
   ctx.save();
   const gx0 = cx - dx * span * 0.35;
   const gy0 = cy - dy * span * 0.35;
   const gx1 = cx + dx * span * 0.35;
   const gy1 = cy + dy * span * 0.35;
   const tint = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
-  tint.addColorStop(0, `rgba(255,255,220,${0.08 + strength * 0.1})`);
+  tint.addColorStop(0, `rgba(255,255,220,${(0.05 + strength * 0.06) * alphaMul})`);
   tint.addColorStop(0.45, 'rgba(0,0,0,0)');
-  tint.addColorStop(1, `rgba(0,40,20,${0.12 + strength * 0.18})`);
+  tint.addColorStop(1, `rgba(0,40,20,${(0.08 + strength * 0.1) * alphaMul})`);
   ctx.fillStyle = tint;
   ctx.fillRect(minX - 4, minY - 4, maxX - minX + 8, maxY - minY + 8);
 
-  // Contour lines (level curves)
-  const spacing = 28 + (1 - strength) * 18;
-  ctx.strokeStyle = `rgba(255,255,255,${0.12 + strength * 0.18})`;
-  ctx.lineWidth = 1.25;
-  ctx.setLineDash([5, 7]);
-  for (let i = -8; i <= 8; i++) {
-    if (i === 0) continue;
-    const ox = cx + dx * i * spacing;
-    const oy = cy + dy * i * spacing;
-    ctx.beginPath();
-    ctx.moveTo(ox - px * span, oy - py * span);
-    ctx.lineTo(ox + px * span, oy + py * span);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-
-  // Downhill hatching near the low side
-  ctx.strokeStyle = `rgba(0,0,0,${0.1 + strength * 0.14})`;
-  ctx.lineWidth = 1;
-  const hatchOriginX = cx + dx * span * 0.22;
-  const hatchOriginY = cy + dy * span * 0.22;
-  for (let i = -6; i <= 6; i++) {
-    const hx = hatchOriginX + px * i * 16;
-    const hy = hatchOriginY + py * i * 16;
-    ctx.beginPath();
-    ctx.moveTo(hx - dx * 10, hy - dy * 10);
-    ctx.lineTo(hx + dx * 14, hy + dy * 14);
-    ctx.stroke();
+  if (!subtle) {
+    const spacing = 28 + (1 - strength) * 18;
+    ctx.strokeStyle = `rgba(255,255,255,${0.12 + strength * 0.18})`;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([5, 7]);
+    for (let i = -8; i <= 8; i++) {
+      if (i === 0) continue;
+      const ox = cx + dx * i * spacing;
+      const oy = cy + dy * i * spacing;
+      ctx.beginPath();
+      ctx.moveTo(ox - px * span, oy - py * span);
+      ctx.lineTo(ox + px * span, oy + py * span);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
-  // Chevron arrows pointing downhill across the green
-  const arrowCount = 3 + Math.floor(strength * 2);
-  ctx.fillStyle = `rgba(255, 230, 140, ${0.35 + strength * 0.35})`;
-  ctx.strokeStyle = `rgba(40, 30, 0, ${0.35 + strength * 0.25})`;
+  // Few downhill chevrons
+  const arrowCount = subtle ? 2 : 3 + Math.floor(strength * 2);
+  ctx.fillStyle = `rgba(255, 230, 140, ${(0.2 + strength * 0.25) * alphaMul})`;
+  ctx.strokeStyle = `rgba(40, 30, 0, ${(0.25 + strength * 0.2) * alphaMul})`;
   ctx.lineWidth = 1.5;
   for (let i = 0; i < arrowCount; i++) {
     const t = (i + 1) / (arrowCount + 1);
     const along = (t - 0.5) * span * 0.55;
     const ax = cx + px * along * 0.35 - dx * span * 0.05;
     const ay = cy + py * along * 0.35 - dy * span * 0.05;
-    // stagger a second column
-    const candidates = [
-      { x: ax, y: ay },
-      { x: ax + dx * spacing * 1.2, y: ay + dy * spacing * 1.2 },
-    ];
-    for (const c of candidates) {
-      if (!pointInPolyLocal(c.x, c.y, green)) continue;
-      const size = 7 + strength * 5;
-      drawChevron(ctx, c.x, c.y, dx, dy, size);
+    if (!pointInPolyLocal(ax, ay, green)) continue;
+    drawChevron(ctx, ax, ay, dx, dy, 6 + strength * 4);
+  }
+  ctx.restore();
+}
+
+/**
+ * Full green-book / PuttView-style overlay from the same height field as physics.
+ * Heatmap by steepness, contour lines of equal elevation, downhill arrows.
+ */
+function drawGreenMapOverlay(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
+  const topo = hole.topo;
+  if (!topo) return;
+  const bounds = topoBounds(green);
+  const { minX, minY, maxX, maxY } = bounds;
+  const step = 14;
+
+  // Sample steepness range for color scale
+  let maxSteep = 0.001;
+  const samples: { x: number; y: number; steep: number; h: number }[] = [];
+  for (let y = minY; y <= maxY; y += step) {
+    for (let x = minX; x <= maxX; x += step) {
+      if (!pointInPolyLocal(x, y, green)) continue;
+      const steep = sampleSteepness(topo, x, y, bounds);
+      const h = sampleHeight(topo, x, y, bounds);
+      samples.push({ x, y, steep, h });
+      if (steep > maxSteep) maxSteep = steep;
     }
   }
+
+  ctx.save();
+  // Heatmap tiles: cool blue (flat) → warm red (steep)
+  for (const s of samples) {
+    const t = Math.min(1, s.steep / maxSteep);
+    const r = Math.round(40 + t * 200);
+    const g = Math.round(120 + (1 - Math.abs(t - 0.45) * 2) * 80);
+    const b = Math.round(220 - t * 180);
+    ctx.fillStyle = `rgba(${r},${g},${b},${0.22 + t * 0.28})`;
+    ctx.fillRect(s.x - step / 2, s.y - step / 2, step, step);
+  }
+
+  // Contour lines — march heights
+  let minH = Infinity;
+  let maxH = -Infinity;
+  for (const s of samples) {
+    minH = Math.min(minH, s.h);
+    maxH = Math.max(maxH, s.h);
+  }
+  const levels = 7;
+  ctx.lineWidth = 1.35;
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.setLineDash([]);
+  for (let li = 1; li < levels; li++) {
+    const level = minH + ((maxH - minH) * li) / levels;
+    ctx.beginPath();
+    let drawing = false;
+    // Horizontal scan for iso crossings (simple)
+    for (let y = minY; y <= maxY; y += step) {
+      for (let x = minX; x <= maxX - step; x += step) {
+        if (!pointInPolyLocal(x, y, green) || !pointInPolyLocal(x + step, y, green)) {
+          drawing = false;
+          continue;
+        }
+        const h0 = sampleHeight(topo, x, y, bounds);
+        const h1 = sampleHeight(topo, x + step, y, bounds);
+        if ((h0 - level) * (h1 - level) <= 0) {
+          const t = Math.abs(h1 - h0) < 1e-9 ? 0.5 : (level - h0) / (h1 - h0);
+          const cx = x + t * step;
+          if (!drawing) {
+            ctx.moveTo(cx, y);
+            drawing = true;
+          } else {
+            ctx.lineTo(cx, y);
+          }
+        } else {
+          drawing = false;
+        }
+      }
+      drawing = false;
+    }
+    ctx.stroke();
+  }
+
+  // Slope arrows pointing downhill on a coarse grid
+  const aStep = step * 2.2;
+  for (let y = minY + aStep / 2; y <= maxY; y += aStep) {
+    for (let x = minX + aStep / 2; x <= maxX; x += aStep) {
+      if (!pointInPolyLocal(x, y, green)) continue;
+      const d = sampleDownhill(topo, x, y, bounds);
+      const dm = Math.hypot(d.x, d.y);
+      if (dm < 1e-5) continue;
+      const dx = d.x / dm;
+      const dy = d.y / dm;
+      const size = 5 + Math.min(1, dm / maxSteep) * 7;
+      ctx.strokeStyle = 'rgba(255, 236, 150, 0.85)';
+      ctx.fillStyle = 'rgba(255, 200, 80, 0.35)';
+      ctx.lineWidth = 1.6;
+      drawChevron(ctx, x, y, dx, dy, size);
+    }
+  }
+
+  // Legend chip
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  roundRect(ctx, minX + 6, maxY - 28, 118, 22, 6);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 11px system-ui,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TOPO · flat→steep', minX + 14, maxY - 17);
   ctx.restore();
 }
 
@@ -476,48 +579,104 @@ function drawChevron(
   ctx.stroke();
 }
 
-/** Compact wind arrow near the green when wind is active. */
-function drawWindIndicator(ctx: CanvasRenderingContext2D, hole: HoleDef, green: Vec2[]): void {
-  const w = hole.wind;
-  if (!w) return;
-  const mag = Math.hypot(w.x, w.y);
-  if (mag < 0.08) return;
-
-  const { minX, minY, maxX, cx } = polyBounds(green);
-  const x = Math.min(maxX - 28, Math.max(minX + 28, cx));
-  const y = minY - 22;
+/**
+ * Fairly large wind key in the themed surround (outside the putting green).
+ * Shows compass arrow (direction wind is blowing) + speed 0–25 mph.
+ */
+function drawWindKey(
+  ctx: CanvasRenderingContext2D,
+  hole: HoleDef,
+  green: Vec2[],
+  pad: number,
+): void {
+  const mph = hole.windMph ?? 0;
+  const w = hole.wind ?? { x: 1, y: 0 };
   const ang = Math.atan2(w.y, w.x);
-  const strength = Math.min(1, mag / 1.2);
+  const { minX, minY, maxX, maxY } = polyBounds(green);
+
+  // Prefer top-right of the board, clamped into the pad surround
+  let x = Math.min(hole.width + pad - 58, Math.max(maxX + 36, hole.width - 20));
+  let y = Math.max(-pad + 58, Math.min(minY - 36, 40));
+  // If green is tall and fills width, park in bottom-left pad
+  if (x > hole.width + pad - 40 || y < -pad + 30) {
+    x = Math.max(-pad + 58, minX - 40);
+    y = Math.min(hole.height + pad - 58, Math.max(maxY + 40, hole.height - 30));
+  }
+  // Final clamp into padded view
+  x = Math.max(-pad + 52, Math.min(hole.width + pad - 52, x));
+  y = Math.max(-pad + 52, Math.min(hole.height + pad - 52, y));
+
+  const strength = Math.min(1, mph / WIND_MAX_MPH);
+  const boxW = 100;
+  const boxH = 96;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(0,20,40,0.45)';
-  roundRect(ctx, x - 26, y - 16, 52, 28, 8);
+  // Panel
+  ctx.fillStyle = 'rgba(8, 24, 48, 0.78)';
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
   ctx.fill();
-  ctx.strokeStyle = `rgba(140,200,255,${0.45 + strength * 0.4})`;
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, x - 26, y - 16, 52, 28, 8);
+  ctx.strokeStyle = mph < 0.5
+    ? 'rgba(255,255,255,0.22)'
+    : `rgba(140, 210, 255, ${0.45 + strength * 0.45})`;
+  ctx.lineWidth = 2;
+  roundRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 14);
   ctx.stroke();
 
-  ctx.translate(x, y);
-  ctx.rotate(ang);
-  ctx.fillStyle = `rgba(180,230,255,${0.75 + strength * 0.25})`;
-  ctx.strokeStyle = 'rgba(20,60,90,0.7)';
-  ctx.lineWidth = 1.25;
-  // Arrow body
+  // Title
+  ctx.fillStyle = 'rgba(200, 230, 255, 0.95)';
+  ctx.font = 'bold 11px system-ui,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('WIND', x, y - boxH / 2 + 14);
+
+  // Compass ring
   ctx.beginPath();
-  ctx.moveTo(-14, 0);
-  ctx.lineTo(6, 0);
+  ctx.arc(x, y + 2, 26, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(180, 220, 255, 0.35)';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
-  // Chevron head
+
+  // Cardinal ticks
+  ctx.strokeStyle = 'rgba(180, 220, 255, 0.4)';
+  ctx.lineWidth = 1.25;
+  for (let i = 0; i < 4; i++) {
+    const a = (i * Math.PI) / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * 22, y + 2 + Math.sin(a) * 22);
+    ctx.lineTo(x + Math.cos(a) * 26, y + 2 + Math.sin(a) * 26);
+    ctx.stroke();
+  }
+
+  // Arrow (blowing toward)
+  ctx.translate(x, y + 2);
+  ctx.rotate(ang);
+  const arrowAlpha = mph < 0.5 ? 0.35 : 0.75 + strength * 0.25;
+  ctx.fillStyle = `rgba(180,230,255,${arrowAlpha})`;
+  ctx.strokeStyle = 'rgba(20,50,80,0.75)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(2, -7);
-  ctx.lineTo(14, 0);
-  ctx.lineTo(2, 7);
+  ctx.moveTo(-18, 0);
+  ctx.lineTo(8, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(4, -10);
+  ctx.lineTo(20, 0);
+  ctx.lineTo(4, 10);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
   ctx.restore();
+
+  // MPH label (after restore so rotation doesn't affect text)
+  ctx.save();
+  ctx.fillStyle = mph < 0.5 ? 'rgba(200,210,220,0.85)' : 'rgba(230, 248, 255, 0.98)';
+  ctx.font = 'bold 16px system-ui,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${mph} mph`, x, y + boxH / 2 - 14);
+  ctx.restore();
 }
+
 
 function drawGreenRim(ctx: CanvasRenderingContext2D, green: Vec2[], theme: HoleTheme): void {
   ctx.save();

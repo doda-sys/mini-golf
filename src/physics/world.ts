@@ -1,5 +1,7 @@
 import type { Bumper, HoleDef, Vec2, Wall, Zone } from '../types';
 import { add, clamp, dist, dot, len, scale, sub } from './math';
+import { polyBounds, sampleDownhill } from '../levels/topo';
+import { WIND_MAX_MPH } from '../levels/generate';
 
 export const BALL_RADIUS = 8;
 export const FRICTION = 0.985;
@@ -14,16 +16,16 @@ export const CUP_DAMP = 0.82;
 /** Max fraction of cup radius for "deep" residence capture. */
 export const CUP_DEEP_FRAC = 0.9;
 /**
- * Crosswind (lateral) scale — dominant: curves the path perpendicular to travel.
- * hole.wind magnitude is roughly 0–1.2.
+ * Crosswind at full 25 mph — noticeable curve, still playable (not drastic).
+ * Effective force scales by (windMph / 25).
  */
-export const WIND_CROSS = 0.052;
-/** Weaker along-track wind (head/tail) so drift feels lateral, not rocket boost. */
-export const WIND_ALONG = 0.014;
+export const WIND_CROSS = 0.030;
+/** Weaker along-track wind (head/tail). */
+export const WIND_ALONG = 0.008;
 /** Speed (px/frame-ish) at which wind reaches full strength. Weaker near stop. */
 export const WIND_SPEED_REF = 7.5;
-/** Constant downhill acceleration scale for hole.slope (~0–1.1 mag). */
-export const SLOPE_ACCEL = 0.032;
+/** Downhill accel scale for topo gradient (gentle, readable break). */
+export const SLOPE_ACCEL = 0.055;
 
 export type BallState = {
   pos: Vec2;
@@ -292,31 +294,40 @@ export function stepBall(ball: BallState, hole: HoleDef, dt: number): void {
   for (let i = 0; i < steps; i++) {
     if (ball.sunk) return;
 
-    // Slope / break: constant gravity-like accel down the green (always on).
-    const slope = hole.slope;
-    if (slope && (slope.x !== 0 || slope.y !== 0)) {
-      ball.vel = add(ball.vel, scale(slope, SLOPE_ACCEL * h * 60));
+    // Green break from height field (same field as the Green Map overlay).
+    if (hole.topo) {
+      const bounds = polyBounds(green);
+      const downhill = sampleDownhill(hole.topo, ball.pos.x, ball.pos.y, bounds);
+      const dm = Math.hypot(downhill.x, downhill.y);
+      if (dm > 1e-8) {
+        // Cap so steep spots stay playable
+        const capped = Math.min(dm, 0.045);
+        const sx = (downhill.x / dm) * capped;
+        const sy = (downhill.y / dm) * capped;
+        ball.vel = {
+          x: ball.vel.x + sx * SLOPE_ACCEL * h * 60,
+          y: ball.vel.y + sy * SLOPE_ACCEL * h * 60,
+        };
+      }
+    } else if (hole.slope && (hole.slope.x !== 0 || hole.slope.y !== 0)) {
+      ball.vel = add(ball.vel, scale(hole.slope, SLOPE_ACCEL * 0.5 * h * 60));
     }
 
-    // Lateral/crosswind drift while moving — stronger at higher speeds, fades near stop.
+    // Wind: mph 0–25 maps linearly; at 25 mph effect is gentle but readable.
     const speedBefore = len(ball.vel);
+    const mph = hole.windMph ?? 0;
     const wind = hole.wind;
-    if (
-      speedBefore > MIN_SPEED &&
-      wind &&
-      (wind.x !== 0 || wind.y !== 0)
-    ) {
+    if (speedBefore > MIN_SPEED && mph > 0 && wind) {
+      const windFactor = Math.min(1, mph / WIND_MAX_MPH);
       const invSp = 1 / speedBefore;
       const tx = ball.vel.x * invSp;
       const ty = ball.vel.y * invSp;
-      // Perpendicular (left normal)
       const nx = -ty;
       const ny = tx;
       const windLat = wind.x * nx + wind.y * ny;
       const windAlong = wind.x * tx + wind.y * ty;
-      // Smooth speed factor: ~0 near MIN_SPEED, ~1 at WIND_SPEED_REF+
       const sf = Math.min(1, Math.max(0, (speedBefore - MIN_SPEED) / (WIND_SPEED_REF - MIN_SPEED)));
-      const windScale = h * 60 * sf;
+      const windScale = h * 60 * sf * windFactor;
       ball.vel = {
         x: ball.vel.x + (nx * windLat * WIND_CROSS + tx * windAlong * WIND_ALONG) * windScale,
         y: ball.vel.y + (ny * windLat * WIND_CROSS + ty * windAlong * WIND_ALONG) * windScale,

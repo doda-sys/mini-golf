@@ -1,6 +1,6 @@
 import './style.css';
 import { HOLES, getHole, dealCourse, loadCourse, courseSeed, courseHoleIds, POOL_SIZE, ROUND_HOLES } from './levels/holes';
-import { slopeStrength, windStrength, WIND_CALM_THRESHOLD } from './levels/generate';
+import { slopeStrength, windStrengthFromMph, WIND_CALM_THRESHOLD, WIND_MAX_MPH } from './levels/generate';
 import { Renderer } from './game/renderer';
 import { InputController } from './game/input';
 import {
@@ -105,11 +105,18 @@ const hud = el('div', { id: 'hud' });
 const holePill = el('div', { class: 'hud-pill', text: 'Hole 1' });
 const strokesPill = el('div', { class: 'hud-pill', text: 'Strokes 0' });
 const windPill = el('div', { class: 'hud-pill wind', id: 'wind-pill', text: 'Wind —' });
+const topoBtn = el('button', {
+  class: 'btn secondary topo-toggle',
+  type: 'button',
+  text: 'Green Map',
+  title: 'Toggle green topography (contours, break arrows, steepness)',
+  style: 'padding:6px 12px;font-size:0.85rem',
+});
 const turnPill = el('div', { class: 'hud-pill turn', text: 'Your turn' });
 const roomPill = el('div', { class: 'hud-pill room hidden', text: '' });
 const playersBar = el('div', { id: 'players-bar' });
 const menuBackBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Menu', style: 'padding:6px 12px;font-size:0.85rem' });
-hud.append(holePill, strokesPill, windPill, turnPill, roomPill, playersBar, menuBackBtn);
+hud.append(holePill, strokesPill, windPill, topoBtn, turnPill, roomPill, playersBar, menuBackBtn);
 
 const canvasWrap = el('div', { id: 'canvas-wrap' });
 const canvas = el('canvas', { id: 'game-canvas' });
@@ -144,8 +151,18 @@ let net: GolfNet | null = null;
 let roomCode = '';
 let lastTs = 0;
 let syncAccum = 0;
+let showGreenMap = false;
 
 const renderer = new Renderer(canvas);
+
+topoBtn.addEventListener('click', () => {
+  showGreenMap = !showGreenMap;
+  topoBtn.classList.toggle('active', showGreenMap);
+  topoBtn.textContent = showGreenMap ? 'Topo ON' : 'Green Map';
+  topoBtn.title = showGreenMap
+    ? 'Hide green topography overlay'
+    : 'Show green topography (contours, break, steepness)';
+});
 
 function playerName(): string {
   const n = nameInput.value.trim().slice(0, 12);
@@ -230,39 +247,29 @@ function layout(): void {
 
 function updateHud(): void {
   const hole = getHole(holeIndex);
-  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par} · ${hole.name}`;
+  holePill.textContent = `Hole ${holeIndex + 1}/${HOLES.length} · Par ${hole.par}`;
+  holePill.title = hole.name;
   const me = localPlayer();
   const st = holeStrokes.get(localId) ?? 0;
   strokesPill.textContent = `Strokes ${st}`;
   {
     const w = hole.wind;
-    const str = windStrength(w);
+    const mph = hole.windMph ?? 0;
+    const str = windStrengthFromMph(mph);
     const slopeStr = slopeStrength(hole.slope ?? { x: 0, y: 0 });
-    if (str < WIND_CALM_THRESHOLD) {
+    const ang = Math.atan2(w.y, w.x);
+    const deg = (ang * 180) / Math.PI;
+    windPill.replaceChildren();
+    if (mph <= WIND_CALM_THRESHOLD) {
       windPill.classList.add('calm');
       windPill.classList.remove('gusty');
-      windPill.replaceChildren();
       const calm = document.createElement('span');
       calm.className = 'wind-calm-label';
-      calm.textContent = 'Calm';
+      calm.textContent = '0 mph';
       windPill.append(calm);
-      if (slopeStr >= 0.08) {
-        const br = document.createElement('span');
-        br.className = 'break-hint';
-        br.textContent = ' · Break';
-        br.title = 'This green has visible break — watch the chevrons';
-        windPill.append(br);
-      }
-      windPill.title = slopeStr >= 0.08
-        ? 'No wind · green has break (see slope marks)'
-        : 'No wind on this hole';
     } else {
       windPill.classList.remove('calm');
       windPill.classList.add('gusty');
-      const ang = Math.atan2(w.y, w.x);
-      const deg = (ang * 180) / Math.PI; // CSS rotate: 0 = right
-      const label = str < 0.35 ? 'light' : str < 0.7 ? 'moderate' : 'strong';
-      windPill.replaceChildren();
       const arrow = document.createElement('span');
       arrow.className = 'wind-arrow';
       arrow.setAttribute('aria-hidden', 'true');
@@ -270,16 +277,19 @@ function updateHud(): void {
       arrow.textContent = '➤';
       const meta = document.createElement('span');
       meta.className = 'wind-meta';
-      meta.textContent = label;
+      meta.textContent = `${mph} mph`;
       windPill.append(arrow, meta);
-      if (slopeStr >= 0.08) {
-        const br = document.createElement('span');
-        br.className = 'break-hint';
-        br.textContent = ' · Break';
-        windPill.append(br);
-      }
-      windPill.title = `Wind ${label} toward ${deg.toFixed(0)}° · crosswind drift scales with speed`;
     }
+    if (slopeStr >= 0.08 || showGreenMap) {
+      const br = document.createElement('span');
+      br.className = 'break-hint';
+      br.textContent = showGreenMap ? ' · Topo' : ' · Break';
+      windPill.append(br);
+    }
+    windPill.title =
+      mph <= WIND_CALM_THRESHOLD
+        ? `Calm (0 mph) · see large wind key on course`
+        : `Wind ${mph} mph (max ${WIND_MAX_MPH}) blowing toward ${deg.toFixed(0)}° · see wind key on course`;
   }
   if (solo) {
     turnPill.textContent = phase === 'rolling' ? 'Ball rolling…' : phase === 'hole-done' ? 'Hole complete!' : 'Your turn';
@@ -390,18 +400,48 @@ function openScorecard(final: boolean): void {
   for (let i = 0; i <= holeIndex; i++) head.append(el('th', { text: String(i + 1) }));
   head.append(el('th', { text: 'Tot' }));
   table.append(head);
+
+  // Par row — per-hole par + total par for holes played (and full 9 when final)
+  const parRow = el('tr', { class: 'par-row' });
+  parRow.append(el('td', { text: 'Par' }));
+  let parSumShown = 0;
+  for (let i = 0; i <= holeIndex; i++) {
+    const p = HOLES[i]?.par ?? 4;
+    parSumShown += p;
+    parRow.append(el('td', { text: String(p) }));
+  }
+  const fullNinePar = HOLES.reduce((a, h) => a + h.par, 0);
+  parRow.append(el('td', { class: 'total', text: String(parSumShown) }));
+  table.append(parRow);
+
   const sorted = [...players].sort((a, b) => a.totalStrokes - b.totalStrokes);
   for (const p of sorted) {
     const tr = el('tr');
     tr.append(el('td', { text: p.name }));
     for (let i = 0; i <= holeIndex; i++) {
-      tr.append(el('td', { text: p.strokes[i] != null ? String(p.strokes[i]) : '—' }));
+      const strokes = p.strokes[i];
+      const par = HOLES[i]?.par ?? 4;
+      const td = el('td', { text: strokes != null ? String(strokes) : '—' });
+      if (strokes != null) {
+        const diff = strokes - par;
+        if (diff <= -2) td.className = 'score-eagle';
+        else if (diff === -1) td.className = 'score-birdie';
+        else if (diff === 0) td.className = 'score-par';
+        else if (diff === 1) td.className = 'score-bogey';
+        else if (diff >= 2) td.className = 'score-double';
+      }
+      tr.append(td);
     }
     const tot = el('td', { class: 'total', text: String(p.totalStrokes) });
     tr.append(tot);
     table.append(tr);
   }
-  scoreBody.replaceChildren(table);
+
+  const parNote = el('p', {
+    class: 'hint',
+    text: `Course par (9): ${fullNinePar} · Through hole ${holeIndex + 1}: ${parSumShown}`,
+  });
+  scoreBody.replaceChildren(table, parNote);
   const more = holeIndex < HOLES.length - 1;
   if (more) {
     nextHoleBtn.classList.toggle('hidden', !solo && !isHost);
@@ -891,7 +931,7 @@ function tick(ts: number): void {
       : null;
 
   input.enabled = isMyTurn();
-  renderer.draw(hole, players, localId, aimPreview, turnPlayerId);
+  renderer.draw(hole, players, localId, aimPreview, turnPlayerId, showGreenMap);
   updateHud();
 }
 

@@ -1,5 +1,12 @@
 import type { Bumper, GrassPattern, HoleDef, Vec2, Wall, Zone } from '../types';
 import { themeForHoleId, type HoleThemeId } from './themes';
+import { makeTopo, type GreenTopo } from './topo';
+
+export const WIND_MAX_MPH = 25;
+/** Target pool mix: ~22% par 3, 56% par 4, 22% par 5. */
+export const PAR3_SHARE = 220;
+export const PAR4_SHARE = 560;
+export const PAR5_SHARE = 220;
 
 const CUP_R = 16;
 const BORDER = 36;
@@ -219,26 +226,39 @@ function makeGrass(id: number, rng: () => number): GrassPattern {
   return { kind: 'carpet', width, angle, a, b, sheen };
 }
 
-function makeWind(rng: () => number): Vec2 {
-  if (rng() < 0.55) return { x: 0, y: 0 };
+/**
+ * Every hole has wind (calm = 0 mph). Direction is always set so the compass
+ * can show blowing-toward even at 0. Deterministic from rng (hole seed).
+ */
+function makeWind(rng: () => number): { dir: Vec2; mph: number } {
   const ang = rng() * Math.PI * 2;
-  const mag = rng() < 0.7 ? 0.14 + rng() * 0.22 : 0.32 + rng() * 0.22;
-  return { x: Math.cos(ang) * mag, y: Math.sin(ang) * mag };
+  const dir = { x: Math.cos(ang), y: Math.sin(ang) };
+  const roll = rng();
+  let mph: number;
+  if (roll < 0.16) mph = 0;
+  else if (roll < 0.5) mph = 1 + Math.floor(rng() * 8); // 1–8 light
+  else if (roll < 0.82) mph = 9 + Math.floor(rng() * 9); // 9–17 moderate
+  else mph = 18 + Math.floor(rng() * 8); // 18–25 strong
+  mph = clamp(mph, 0, WIND_MAX_MPH);
+  return { dir, mph };
 }
 
-function makeSlope(id: number, layout: LayoutId, pathDir: Vec2, rng: () => number): Vec2 {
-  const wantHill = layout === 'hill' || rng() < 0.1;
-  if (!wantHill) return { x: 0, y: 0 };
-  const pl = Math.hypot(pathDir.x, pathDir.y) || 1;
-  const along = { x: pathDir.x / pl, y: pathDir.y / pl };
-  const lat = { x: -along.y, y: along.x };
-  const mix = 0.15 + rng() * 0.35;
-  const side = rng() < 0.5 ? 1 : -1;
-  const dx = along.x * (1 - mix) + lat.x * mix * side;
-  const dy = along.y * (1 - mix) + lat.y * mix * side;
-  const dl = Math.hypot(dx, dy) || 1;
-  const mag = layout === 'hill' ? 0.22 + rng() * 0.28 : 0.14 + rng() * 0.2;
-  return { x: (dx / dl) * mag, y: (dy / dl) * mag };
+/** Topo intensity scales with par so harder holes break more. */
+function topoIntensity(par: number, layout: LayoutId, rng: () => number): number {
+  let base = par === 3 ? 0.35 : par === 4 ? 0.55 : 0.72;
+  if (layout === 'hill') base += 0.2;
+  return clamp(base + (rng() - 0.5) * 0.18, 0.22, 1);
+}
+
+/** Average downhill from topo tilt — for HUD break hint. */
+function slopeFromTopo(topo: GreenTopo): Vec2 {
+  const dx = -topo.tiltX * topo.strength;
+  const dy = -topo.tiltY * topo.strength;
+  const mag = Math.hypot(dx, dy);
+  if (mag < 1e-6) return { x: 0, y: 0 };
+  // Normalize to ~0–1.1 range similar to legacy slope
+  const scale = Math.min(1.1, mag * 1.4);
+  return { x: (dx / mag) * scale, y: (dy / mag) * scale };
 }
 
 // ─── Geometric channel polygons (axis-aligned rails, course-like) ───────────
@@ -490,30 +510,40 @@ function chicanePoly(
 
 // ─── Layout builders ────────────────────────────────────────────────────────
 
-function buildStraight(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildStraight(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 3): BuiltLayout {
   const hw = laneHalf(rng, 78, 108);
   const teeY = H - BORDER - 70;
   const cupY = BORDER + 70;
   const cx = W / 2 + (rng() - 0.5) * 36;
   const green = verticalCorridor(cx, teeY, cupY, hw);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx, y: cupY };
+  // Cup already nudged later; seed a lateral bias here too
+  const cupOff = (par >= 4 ? 22 : 12) * (rng() < 0.5 ? 1 : -1);
+  const cup = { x: cx + cupOff, y: cupY };
   const walls: Wall[] = [];
   const bumpers: Bumper[] = [];
   const zones: Zone[] = [];
   const kinds = themeHazards(themeId);
 
-  if (rng() < 0.5) {
+  // Always block the dead-center lane (gate with side gap)
+  const gateY = teeY + (cupY - teeY) * (0.42 + rng() * 0.18);
+  const gap = Math.max(36, 56 - par * 4) + rng() * 12;
+  const gapSide = rng() < 0.5 ? -1 : 1;
+  const gapCenter = cx + gapSide * (hw * 0.25);
+  walls.push(wall(cx - hw + 6, gateY - 12, Math.max(20, gapCenter - gap / 2 - (cx - hw + 6)), 24));
+  walls.push(wall(gapCenter + gap / 2, gateY - 12, Math.max(20, cx + hw - 6 - (gapCenter + gap / 2)), 24));
+
+  if (par >= 4 || rng() < 0.65) {
     const midY = (teeY + cupY) / 2;
     const side = rng() < 0.5 ? -1 : 1;
-    const z = zoneRect(cx + side * (hw * 0.45), midY, 50 + rng() * 28, 70 + rng() * 40, kinds[0], rng);
+    const z = zoneRect(cx + side * (hw * 0.4), midY, 50 + rng() * 28, 70 + rng() * 40, kinds[0], rng);
     if (keepZoneOnGreen(z, green, tee, cup)) zones.push(z);
   }
-  if (rng() < 0.3) {
+  if (par >= 4 || rng() < 0.55) {
     bumpers.push({
-      x: cx + (rng() - 0.5) * hw * 0.5,
-      y: lerp(tee, cup, 0.55).y,
-      r: 16 + rng() * 6,
+      x: cx - gapSide * hw * 0.2,
+      y: gateY - 55,
+      r: 15 + rng() * 6,
     });
   }
   return {
@@ -523,13 +553,13 @@ function buildStraight(rng: () => number, W: number, H: number, themeId: HoleThe
     walls,
     bumpers,
     zones,
-    pathDir: { x: 0, y: cupY - teeY },
-    difficulty: 0.12 + rng() * 0.18,
+    pathDir: { x: cup.x - tee.x, y: cupY - teeY },
+    difficulty: 0.28 + par * 0.08 + rng() * 0.15,
     pathLen: Math.abs(teeY - cupY),
   };
 }
 
-function buildDogleg(rng: () => number, W: number, H: number, left: boolean, themeId: HoleThemeId): BuiltLayout {
+function buildDogleg(rng: () => number, W: number, H: number, left: boolean, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 70, 96);
   const teeY = H - BORDER - 68;
   const cupY = BORDER + 68;
@@ -586,7 +616,7 @@ function buildDogleg(rng: () => number, W: number, H: number, left: boolean, the
   };
 }
 
-function buildYSplit(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildYSplit(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 68, 92);
   const teeY = H - BORDER - 68;
   const forkY = H * (0.5 + rng() * 0.08);
@@ -624,7 +654,7 @@ function buildYSplit(rng: () => number, W: number, H: number, themeId: HoleTheme
   };
 }
 
-function buildSCurve(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildSCurve(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 68, 94);
   const teeY = H - BORDER - 68;
   const cupY = BORDER + 68;
@@ -662,7 +692,7 @@ function buildSCurve(rng: () => number, W: number, H: number, themeId: HoleTheme
   };
 }
 
-function buildBank(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildBank(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 64, 88);
   const teeY = H - BORDER - 68;
   const cupY = BORDER + 68;
@@ -703,7 +733,7 @@ function buildBank(rng: () => number, W: number, H: number, themeId: HoleThemeId
   };
 }
 
-function buildRunaround(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildRunaround(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 92, 120);
   const teeY = H - BORDER - 70;
   const cupY = BORDER + 70;
@@ -716,8 +746,8 @@ function buildRunaround(rng: () => number, W: number, H: number, themeId: HoleTh
   const bumpers: Bumper[] = [];
   const zones: Zone[] = [];
 
-  const blockW = 70 + rng() * 50;
-  const blockH = 90 + rng() * 60;
+  const blockW = 80 + rng() * 50 + (par - 3) * 12;
+  const blockH = 100 + rng() * 60 + (par - 3) * 16;
   walls.push(wall(cx - blockW / 2, midY - blockH / 2, blockW, blockH));
 
   const side = rng() < 0.5 ? -1 : 1;
@@ -746,7 +776,7 @@ function buildRunaround(rng: () => number, W: number, H: number, themeId: HoleTh
   };
 }
 
-function buildGate(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildGate(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 3): BuiltLayout {
   const hw = laneHalf(rng, 88, 118);
   const teeY = H - BORDER - 70;
   const cupY = BORDER + 70;
@@ -754,19 +784,34 @@ function buildGate(rng: () => number, W: number, H: number, themeId: HoleThemeId
   const gateY = H * (0.44 + rng() * 0.1);
   const green = rectCorridor(cx, teeY, cupY, hw, 26);
   const tee = { x: cx, y: teeY };
-  const cup = { x: cx, y: cupY };
-  const gap = 44 + rng() * 28;
+  const cupOff = (10 + par * 6) * (rng() < 0.5 ? 1 : -1);
+  const cup = { x: cx + cupOff, y: cupY };
+  // Offset gap so dead-center is blocked; skilled players thread the side
+  const gap = Math.max(32, 52 - par * 5) + rng() * 16;
+  const gapShift = (hw * 0.22 + rng() * 12) * (rng() < 0.5 ? 1 : -1);
   const walls: Wall[] = [];
-  walls.push(wall(cx - hw + 8, gateY - 12, hw - gap / 2 - 8, 24));
-  walls.push(wall(cx + gap / 2, gateY - 12, hw - gap / 2 - 8, 24));
+  const leftEnd = cx + gapShift - gap / 2;
+  const rightStart = cx + gapShift + gap / 2;
+  walls.push(wall(cx - hw + 8, gateY - 12, Math.max(24, leftEnd - (cx - hw + 8)), 24));
+  walls.push(wall(rightStart, gateY - 12, Math.max(24, cx + hw - 8 - rightStart), 24));
+  // Second staggered gate on higher pars
+  if (par >= 4) {
+    const g2 = gateY + (cupY - gateY) * 0.45;
+    const shift2 = -gapShift * 0.7;
+    const gap2 = gap + 4;
+    const l2 = cx + shift2 - gap2 / 2;
+    const r2 = cx + shift2 + gap2 / 2;
+    walls.push(wall(cx - hw + 8, g2 - 10, Math.max(20, l2 - (cx - hw + 8)), 20));
+    walls.push(wall(r2, g2 - 10, Math.max(20, cx + hw - 8 - r2), 20));
+  }
 
   const bumpers: Bumper[] = [];
   const zones: Zone[] = [];
-  if (rng() < 0.35) bumpers.push({ x: cx, y: gateY - 70, r: 14 + rng() * 5 });
+  if (par >= 4 || rng() < 0.55) bumpers.push({ x: cx - gapShift * 0.3, y: gateY - 70, r: 14 + rng() * 5 });
 
-  if (rng() < 0.45) {
+  if (par >= 4 || rng() < 0.55) {
     const kinds = themeHazards(themeId);
-    const z = zoneRect(cx + hw * 0.4, (teeY + gateY) / 2, 48, 64, kinds[0], rng);
+    const z = zoneRect(cx + hw * 0.35, (teeY + gateY) / 2, 48, 64, kinds[0], rng);
     if (keepZoneOnGreen(z, green, tee, cup)) zones.push(z);
   }
 
@@ -777,13 +822,13 @@ function buildGate(rng: () => number, W: number, H: number, themeId: HoleThemeId
     walls: walls.filter((w) => keepWallClear(w, tee, cup)),
     bumpers,
     zones,
-    pathDir: { x: 0, y: cupY - teeY },
-    difficulty: 0.32 + rng() * 0.25,
+    pathDir: { x: cup.x - tee.x, y: cupY - teeY },
+    difficulty: 0.36 + par * 0.06 + rng() * 0.2,
     pathLen: Math.abs(teeY - cupY),
   };
 }
 
-function buildIsland(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildIsland(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 5): BuiltLayout {
   const teeY = H - BORDER - 72;
   const cupY = BORDER + 72;
   const cx = W / 2;
@@ -824,15 +869,15 @@ function buildIsland(rng: () => number, W: number, H: number, themeId: HoleTheme
   };
 }
 
-function buildHill(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
-  const base = buildStraight(rng, W, H, themeId);
+function buildHill(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 3): BuiltLayout {
+  const base = buildStraight(rng, W, H, themeId, par);
   base.difficulty = 0.38 + rng() * 0.2;
   base.walls = [];
   if (base.bumpers.length > 1) base.bumpers = base.bumpers.slice(0, 1);
   return base;
 }
 
-function buildHorseshoe(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildHorseshoe(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 5): BuiltLayout {
   const hw = laneHalf(rng, 68, 92);
   const top = BORDER + 78;
   const bot = H - BORDER - 78;
@@ -866,7 +911,7 @@ function buildHorseshoe(rng: () => number, W: number, H: number, themeId: HoleTh
   };
 }
 
-function buildChicane(rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildChicane(rng: () => number, W: number, H: number, themeId: HoleThemeId, par = 4): BuiltLayout {
   const hw = laneHalf(rng, 70, 96);
   const teeY = H - BORDER - 68;
   const cupY = BORDER + 68;
@@ -903,34 +948,41 @@ function buildChicane(rng: () => number, W: number, H: number, themeId: HoleThem
   };
 }
 
-function buildLayout(layout: LayoutId, rng: () => number, W: number, H: number, themeId: HoleThemeId): BuiltLayout {
+function buildLayout(
+  layout: LayoutId,
+  rng: () => number,
+  W: number,
+  H: number,
+  themeId: HoleThemeId,
+  par: number,
+): BuiltLayout {
   switch (layout) {
     case 'straight':
-      return buildStraight(rng, W, H, themeId);
+      return buildStraight(rng, W, H, themeId, par);
     case 'dogleg_l':
-      return buildDogleg(rng, W, H, true, themeId);
+      return buildDogleg(rng, W, H, true, themeId, par);
     case 'dogleg_r':
-      return buildDogleg(rng, W, H, false, themeId);
+      return buildDogleg(rng, W, H, false, themeId, par);
     case 'y_split':
-      return buildYSplit(rng, W, H, themeId);
+      return buildYSplit(rng, W, H, themeId, par);
     case 's_curve':
-      return buildSCurve(rng, W, H, themeId);
+      return buildSCurve(rng, W, H, themeId, par);
     case 'bank':
-      return buildBank(rng, W, H, themeId);
+      return buildBank(rng, W, H, themeId, par);
     case 'runaround':
-      return buildRunaround(rng, W, H, themeId);
+      return buildRunaround(rng, W, H, themeId, par);
     case 'gate':
-      return buildGate(rng, W, H, themeId);
+      return buildGate(rng, W, H, themeId, par);
     case 'island':
-      return buildIsland(rng, W, H, themeId);
+      return buildIsland(rng, W, H, themeId, par);
     case 'hill':
-      return buildHill(rng, W, H, themeId);
+      return buildHill(rng, W, H, themeId, par);
     case 'horseshoe':
-      return buildHorseshoe(rng, W, H, themeId);
+      return buildHorseshoe(rng, W, H, themeId, par);
     case 'chicane':
-      return buildChicane(rng, W, H, themeId);
+      return buildChicane(rng, W, H, themeId, par);
     default:
-      return buildStraight(rng, W, H, themeId);
+      return buildStraight(rng, W, H, themeId, par);
   }
 }
 
@@ -989,31 +1041,99 @@ function ensurePlayable(layout: BuiltLayout): BuiltLayout {
   return layout;
 }
 
-function computePar(
-  pathLen: number,
-  difficulty: number,
-  layout: LayoutId,
+/**
+ * Enforce ~22% / 56% / 22% par 3/4/5 across the 1000-hole pool.
+ * Multiplicative hash makes adjacent ids scramble into buckets; for ids
+ * 1..1000 this is a bijection mod 1000 ⇒ exactly 220 / 560 / 220.
+ */
+export function parForHoleId(id: number, poolSize = POOL_SIZE): number {
+  const n = Math.max(1, poolSize);
+  const slot = (((id - 1) * 761) % n + n) % n;
+  if (slot < PAR3_SHARE) return 3;
+  if (slot < PAR3_SHARE + PAR4_SHARE) return 4;
+  return 5;
+}
+
+const PAR3_LAYOUTS: LayoutId[] = ['gate', 'straight', 'hill', 'runaround', 'bank', 'dogleg_l'];
+const PAR4_LAYOUTS: LayoutId[] = ['dogleg_l', 'dogleg_r', 's_curve', 'bank', 'chicane', 'gate', 'runaround', 'y_split'];
+const PAR5_LAYOUTS: LayoutId[] = ['horseshoe', 'island', 'y_split', 'chicane', 's_curve', 'dogleg_l', 'dogleg_r', 'bank'];
+
+function layoutForPar(id: number, par: number): LayoutId {
+  const list = par === 3 ? PAR3_LAYOUTS : par === 5 ? PAR5_LAYOUTS : PAR4_LAYOUTS;
+  return list[(id - 1) % list.length];
+}
+
+/**
+ * Place a blocker on/near the tee→cup line so a dead-center aim is not a free HIO.
+ * Gap / offset keeps skilled bank or thread shots viable.
+ */
+function blockCenterShot(
+  tee: Vec2,
+  cup: Vec2,
+  walls: Wall[],
+  bumpers: Bumper[],
+  par: number,
   rng: () => number,
-): number {
-  let par = 2;
-  if (layout === 'straight' || layout === 'gate' || layout === 'hill') {
-    par = pathLen > 780 || difficulty > 0.4 ? 3 : 2;
-  } else if (
-    layout === 'dogleg_l' ||
-    layout === 'dogleg_r' ||
-    layout === 'runaround' ||
-    layout === 'bank' ||
-    layout === 's_curve'
-  ) {
-    par = 3;
-    if (difficulty > 0.62 && pathLen > 1000) par = 4;
-  } else {
-    par = 3;
-    if (difficulty > 0.55 || pathLen > 1100) par = 4;
+  green: Vec2[],
+): void {
+  const dx = cup.x - tee.x;
+  const dy = cup.y - tee.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const px = -uy;
+  const py = ux;
+  // Midpoint blocker — slightly off-center so a bank/gap remains
+  const t = 0.38 + rng() * 0.28;
+  const mid = { x: tee.x + dx * t, y: tee.y + dy * t };
+  const side = rng() < 0.5 ? 1 : -1;
+  const offset = (par >= 5 ? 8 : 14) + rng() * 10;
+  const bx = mid.x + px * side * offset;
+  const by = mid.y + py * side * offset;
+
+  if (par >= 4 || rng() < 0.75) {
+    // Cross-bar with a side gap (gate) — blocks straight thread
+    const barW = 48 + par * 10 + rng() * 24;
+    const barH = 16 + (par >= 5 ? 4 : 0);
+    // Orient bar roughly perpendicular to path (AABB approx)
+    const alongDominant = Math.abs(dx) > Math.abs(dy);
+    let w: Wall;
+    if (alongDominant) {
+      // path is horizontal-ish → vertical bar
+      w = wall(bx - barH / 2, by - barW / 2, barH, barW);
+    } else {
+      w = wall(bx - barW / 2, by - barH / 2, barW, barH);
+    }
+    if (keepWallClear(w, tee, cup, 44) && pointInPoly(bx, by, green)) {
+      walls.push(w);
+    }
   }
-  if (rng() < 0.08 && par < 4) par += 1;
-  if (rng() < 0.04 && par === 4) par = 5;
-  return clamp(par, 2, 5);
+
+  // Bumper on the remaining gap side for higher pars
+  if (par >= 4 || rng() < 0.55) {
+    const gapSide = -side;
+    const gx = mid.x + px * gapSide * (22 + rng() * 18);
+    const gy = mid.y + py * gapSide * (22 + rng() * 18);
+    if (
+      pointInPoly(gx, gy, green) &&
+      Math.hypot(gx - tee.x, gy - tee.y) > 50 &&
+      Math.hypot(gx - cup.x, gy - cup.y) > 50
+    ) {
+      bumpers.push({ x: gx, y: gy, r: 14 + rng() * 6 + (par >= 5 ? 2 : 0) });
+    }
+  }
+}
+
+/** Nudge cup off the pure centerline so "aim straight" misses. */
+function offsetCupOffCenter(tee: Vec2, cup: Vec2, par: number, rng: () => number): Vec2 {
+  const dx = cup.x - tee.x;
+  const dy = cup.y - tee.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const px = -dy / dist;
+  const py = dx / dist;
+  const mag = (par === 3 ? 18 : par === 4 ? 28 : 36) + rng() * 16;
+  const side = rng() < 0.5 ? 1 : -1;
+  return { x: cup.x + px * side * mag, y: cup.y + py * side * mag };
 }
 
 /**
@@ -1024,23 +1144,36 @@ export function generateHole(id: number): HoleDef {
   const rng = mulberry32(id * 2654435761 + 0x9e3779b9);
   const theme = themeForHoleId(id);
   const themeId = theme.id as HoleThemeId;
-  const layout = LAYOUTS[(id - 1) % LAYOUTS.length];
+  const par = parForHoleId(id);
+  const layout = layoutForPar(id, par);
 
-  // Phone-filling fairways — substantially larger than prior ~440×660 boards
-  const width = 560 + Math.floor(rng() * 180);   // 560–740
-  const height = 920 + Math.floor(rng() * 220);  // 920–1140
+  // Phone-filling fairways — size scales mildly with par
+  const width = 560 + Math.floor(rng() * 180) + (par - 3) * 20;
+  const height = 920 + Math.floor(rng() * 220) + (par - 3) * 40;
 
-  let built = ensurePlayable(buildLayout(layout, rng, width, height, themeId));
+  let built = ensurePlayable(buildLayout(layout, rng, width, height, themeId, par));
   built.green = built.green.map((p) => ({
     x: clamp(p.x, 10, width - 10),
     y: clamp(p.y, 10, height - 10),
   }));
+  // Offset cup so dead-center aim rarely threads
+  built.cup = offsetCupOffCenter(built.tee, built.cup, par, rng);
   built = ensurePlayable(built);
+  blockCenterShot(built.tee, built.cup, built.walls, built.bumpers, par, rng, built.green);
+  built = ensurePlayable(built);
+
+  // Extra hazard density for higher pars
+  if (par >= 4 && built.zones.length < (par === 5 ? 2 : 1) && rng() < 0.7) {
+    const kinds = themeHazards(themeId);
+    const mid = lerp(built.tee, built.cup, 0.45 + rng() * 0.2);
+    const z = zoneRect(mid.x + (rng() - 0.5) * 40, mid.y, 44 + rng() * 20, 55 + rng() * 30, kinds[0], rng);
+    if (keepZoneOnGreen(z, built.green, built.tee, built.cup)) built.zones.push(z);
+  }
 
   const grass = makeGrass(id, rng);
   const wind = makeWind(rng);
-  const slope = makeSlope(id, layout, built.pathDir, rng);
-  const par = computePar(built.pathLen, built.difficulty, layout, rng);
+  const topo = makeTopo(rng, built.pathDir, topoIntensity(par, layout, rng));
+  const slope = slopeFromTopo(topo);
 
   return {
     id,
@@ -1057,7 +1190,12 @@ export function generateHole(id: number): HoleDef {
     zones: built.zones,
     theme: themeId,
     grass,
-    wind: { x: Math.round(wind.x * 1000) / 1000, y: Math.round(wind.y * 1000) / 1000 },
+    wind: {
+      x: Math.round(wind.dir.x * 1000) / 1000,
+      y: Math.round(wind.dir.y * 1000) / 1000,
+    },
+    windMph: wind.mph,
+    topo,
     slope: { x: Math.round(slope.x * 1000) / 1000, y: Math.round(slope.y * 1000) / 1000 },
   };
 }
@@ -1078,17 +1216,25 @@ export function pickCourseIds(seed: number, count = ROUND_HOLES, poolSize = POOL
   return ids.slice(0, count);
 }
 
-export function windStrength(wind: Vec2): number {
-  return Math.min(1, Math.hypot(wind.x, wind.y) / 1.2);
+/** 0–1 strength from mph (0–25). */
+export function windStrengthFromMph(mph: number): number {
+  return Math.min(1, Math.max(0, mph) / WIND_MAX_MPH);
+}
+
+/** Legacy helper — prefer windStrengthFromMph(hole.windMph). */
+export function windStrength(wind: Vec2, windMph?: number): number {
+  if (windMph != null) return windStrengthFromMph(windMph);
+  return Math.min(1, Math.hypot(wind.x, wind.y));
 }
 
 export function slopeStrength(slope: Vec2): number {
   return Math.min(1, Math.hypot(slope.x, slope.y) / 1.1);
 }
 
-export const WIND_CALM_THRESHOLD = 0.08;
+export const WIND_CALM_THRESHOLD = 0.5; // mph
 
 /** Exported for tests / debugging. */
 export function layoutForHoleId(id: number): LayoutId {
-  return LAYOUTS[(id - 1) % LAYOUTS.length];
+  const par = parForHoleId(id);
+  return layoutForPar(id, par);
 }
