@@ -13,6 +13,14 @@ import {
 import { GolfNet, PLAYER_COLORS, generateRoomCode, makePlayer } from './net/peer';
 import type { GameMode, NetMessage, PlayerInfo, Vec2 } from './types';
 import { len } from './physics/math';
+import {
+  ensureScoreToken,
+  fetchLeaderboard,
+  formatVsPar as lbFormatVsPar,
+  recordScoreCheckin,
+  submitRoundScore,
+  vsParForScore,
+} from './leaderboard';
 
 const COLORS = PLAYER_COLORS;
 
@@ -38,9 +46,10 @@ const menuScreen = el('div', { class: 'screen', id: 'menu-screen' });
 const lobbyScreen = el('div', { class: 'screen hidden', id: 'lobby-screen' });
 const gameScreen = el('div', { class: 'screen hidden', id: 'game-screen' });
 const scoreOverlay = el('div', { class: 'overlay-card hidden', id: 'score-overlay' });
+const leaderboardOverlay = el('div', { class: 'overlay-card hidden', id: 'leaderboard-overlay' });
 const toast = el('div', { id: 'toast' });
 
-app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, toast);
+app.append(menuScreen, lobbyScreen, gameScreen, scoreOverlay, leaderboardOverlay, toast);
 
 // Menu
 menuScreen.append(
@@ -60,6 +69,7 @@ const nameInput = el('input', {
 nameInput.value = localStorage.getItem('mg-name') || randomName();
 const soloBtn = el('button', { class: 'btn accent', type: 'button', text: 'Play Solo' });
 const createBtn = el('button', { class: 'btn', type: 'button', text: 'Create Room' });
+const leaderboardMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
 const joinRow = el('div', { class: 'row' });
 const joinCodeInput = el('input', {
   type: 'text',
@@ -80,6 +90,7 @@ menuCard.append(
   el('label', { text: 'Join with code' }),
   joinRow,
   menuError,
+  leaderboardMenuBtn,
   el('p', {
     class: 'hint',
     text: 'Multiplayer is peer-to-peer with room codes — both players must keep the tab open. Take turns on the same hole.',
@@ -129,8 +140,18 @@ const scoreTitle = el('h2', { text: 'Scorecard', style: 'margin:0' });
 const scoreBody = el('div');
 const nextHoleBtn = el('button', { class: 'btn accent', type: 'button', text: 'Next Hole' });
 const scoreMenuBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Main Menu' });
-scoreCard.append(scoreTitle, scoreBody, nextHoleBtn, scoreMenuBtn);
+const scoreLeaderboardBtn = el('button', { class: 'btn secondary', type: 'button', text: 'Leaderboard' });
+scoreCard.append(scoreTitle, scoreBody, nextHoleBtn, scoreLeaderboardBtn, scoreMenuBtn);
 scoreOverlay.append(scoreCard);
+
+// Leaderboard overlay
+const lbCard = el('div', { class: 'card leaderboard-card' });
+const lbTitle = el('h2', { text: 'All-time leaderboard', style: 'margin:0' });
+const lbNote = el('p', { class: 'hint lb-note', text: 'Shared worldwide · lowest strokes wins' });
+const lbBody = el('div', { class: 'leaderboard-list', id: 'leaderboard-list' });
+const lbCloseBtn = el('button', { class: 'btn accent', type: 'button', text: 'Close' });
+lbCard.append(lbTitle, lbNote, lbBody, lbCloseBtn);
+leaderboardOverlay.append(lbCard);
 
 // ---- State ----
 type Phase = 'aiming' | 'rolling' | 'hole-done' | 'round-done';
@@ -152,6 +173,8 @@ let roomCode = '';
 let lastTs = 0;
 let syncAccum = 0;
 let showGreenMap = false;
+/** Prevent double-saving the same completed 9 into the leaderboard. */
+let leaderboardSavedThisRound = false;
 
 const renderer = new Renderer(canvas);
 
@@ -229,6 +252,8 @@ function startSolo(): void {
   localColor = COLORS[0];
   dealCourse();
   holeIndex = 0;
+  leaderboardSavedThisRound = false;
+  beginRoundScoreToken();
   players = [makePlayer(localId, localName, localColor, getHole(0).tee)];
   balls.clear();
   resetHolePositions();
@@ -407,7 +432,84 @@ function scoreDiffClass(diff: number): string {
   return 'score-double';
 }
 
+/**
+ * Submit this client's local player to the shared board.
+ * Each MP peer submits only themselves (tokens are IP-bound & single-use).
+ */
+function recordRoundOnLeaderboard(): void {
+  if (leaderboardSavedThisRound) return;
+  if (holeIndex < HOLES.length - 1) return;
+  const me = localPlayer();
+  if (
+    !me ||
+    !(me.totalStrokes > 0) ||
+    me.strokes.length < HOLES.length ||
+    !me.strokes.slice(0, HOLES.length).every((s) => typeof s === 'number' && s > 0)
+  ) {
+    return;
+  }
+  leaderboardSavedThisRound = true;
+  const name = me.name;
+  const strokes = me.totalStrokes;
+  void (async () => {
+    const ok = await submitRoundScore(name, strokes);
+    if (ok) showToast('Score posted to leaderboard!');
+    else showToast('Could not post score (offline?) — round still counts locally');
+  })();
+}
+
+async function renderLeaderboardList(): Promise<void> {
+  lbBody.replaceChildren(
+    el('p', { class: 'leaderboard-empty', text: 'Loading leaderboard…' }),
+  );
+  const entries = await fetchLeaderboard();
+  if (entries.length === 0) {
+    lbBody.replaceChildren(
+      el('p', {
+        class: 'leaderboard-empty',
+        text: 'No scores yet — or the board is unreachable. Finish a 9-hole round to post yours!',
+      }),
+    );
+    return;
+  }
+  const table = el('table', { class: 'leaderboard-table' });
+  const head = el('tr');
+  head.append(
+    el('th', { text: '#' }),
+    el('th', { text: 'Name' }),
+    el('th', { text: 'Strokes' }),
+    el('th', { text: '+/−', title: 'Vs championship course par' }),
+  );
+  table.append(head);
+  for (const e of entries) {
+    const tr = el('tr');
+    const vs = vsParForScore(e.score);
+    tr.append(
+      el('td', { class: 'lb-rank', text: String(e.rank) }),
+      el('td', { class: 'lb-name', text: e.name }),
+      el('td', { class: 'lb-score', text: String(e.score) }),
+      el('td', { class: `lb-vs ${scoreDiffClass(vs)}`, text: lbFormatVsPar(vs) }),
+    );
+    table.append(tr);
+  }
+  lbBody.replaceChildren(table);
+}
+
+function openLeaderboard(): void {
+  leaderboardOverlay.classList.remove('hidden');
+  void renderLeaderboardList();
+}
+
+function closeLeaderboard(): void {
+  leaderboardOverlay.classList.add('hidden');
+}
+
+function beginRoundScoreToken(): void {
+  void ensureScoreToken();
+}
+
 function openScorecard(final: boolean): void {
+  recordScoreCheckin();
   scoreTitle.textContent = final ? 'Final Scores' : `Hole ${holeIndex + 1} Complete`;
   const table = el('table', { class: 'score-table' });
   const head = el('tr');
@@ -482,6 +584,7 @@ function openScorecard(final: boolean): void {
     nextHoleBtn.textContent = solo || isHost ? 'Play another 9' : 'Waiting for host…';
     nextHoleBtn.disabled = !solo && !isHost;
     scoreMenuBtn.textContent = 'Back to menu';
+    recordRoundOnLeaderboard();
   }
   scoreOverlay.classList.remove('hidden');
 }
@@ -490,6 +593,8 @@ function startAnotherNine(): void {
   // Replay the same curated championship 9
   const ids = dealCourse();
   holeIndex = 0;
+  leaderboardSavedThisRound = false;
+  beginRoundScoreToken();
   for (const p of players) {
     p.strokes = [];
     p.totalStrokes = 0;
@@ -713,6 +818,8 @@ function handleNetMessage(msg: NetMessage, fromId: string): void {
       if (msg.holeIds?.length) loadCourse(msg.holeIds, msg.courseSeed);
       holeIndex = msg.holeIndex;
       turnPlayerId = msg.turnPlayerId;
+      leaderboardSavedThisRound = false;
+      beginRoundScoreToken();
       resetHolePositions();
       // re-apply from sync if players already set
       phase = 'aiming';
@@ -848,6 +955,8 @@ function startMultiplayerRound(): void {
   if (!isHost) return;
   const ids = dealCourse();
   holeIndex = 0;
+  leaderboardSavedThisRound = false;
+  beginRoundScoreToken();
   for (const p of players) {
     p.strokes = [];
     p.totalStrokes = 0;
@@ -867,6 +976,12 @@ function startMultiplayerRound(): void {
 
 // Events
 soloBtn.addEventListener('click', startSolo);
+leaderboardMenuBtn.addEventListener('click', openLeaderboard);
+scoreLeaderboardBtn.addEventListener('click', openLeaderboard);
+lbCloseBtn.addEventListener('click', closeLeaderboard);
+leaderboardOverlay.addEventListener('click', (e) => {
+  if (e.target === leaderboardOverlay) closeLeaderboard();
+});
 createBtn.addEventListener('click', () => void createRoom());
 joinBtn.addEventListener('click', () => void joinRoom());
 joinCodeInput.addEventListener('keydown', (e) => {
@@ -881,6 +996,7 @@ leaveLobbyBtn.addEventListener('click', () => {
 menuBackBtn.addEventListener('click', () => {
   destroyNet();
   scoreOverlay.classList.add('hidden');
+  closeLeaderboard();
   showScreen('menu');
   mode = 'menu';
   input.enabled = false;
@@ -896,6 +1012,7 @@ nextHoleBtn.addEventListener('click', () => {
 scoreMenuBtn.addEventListener('click', () => {
   destroyNet();
   scoreOverlay.classList.add('hidden');
+  closeLeaderboard();
   showScreen('menu');
   mode = 'menu';
 });

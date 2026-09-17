@@ -422,3 +422,91 @@ label {
   font-variant-numeric: tabular-nums;
   min-width: 2.4em;
 }
+
+/* ---- All-time leaderboard ---- */
+.leaderboard-card {
+  width: min(520px, 100%);
+  max-height: min(86vh, 720px);
+}
+
+.lb-note {
+  margin: -4px 0 0;
+  opacity: 0.9;
+}
+
+.leaderboard-list {
+  overflow: auto;
+  max-height: min(52vh, 420px);
+  margin: 4px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.leaderboard-empty {
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  white-space: nowrap;
+}
+
+.leaderboard-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(8, 40, 30, 0.96);
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  z-index: 1;
+}
+
+.leaderboard-table .lb-rank {
+  width: 2.2em;
+  color: var(--accent2);
+  font-weight: 800;
+}
+
+.leaderboard-table .lb-name {
+  font-weight: 700;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaderboard-table .lb-score {
+  font-weight: 800;
+  color: var(--accent2);
+}
+
+.leaderboard-table .lb-vs {
+  font-weight: 800;
+  min-width: 2.6em;
+}
+
+.leaderboard-table .lb-date {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+#leaderboard-overlay {
+  z-index: 18;
+}
